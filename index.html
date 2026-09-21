@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Sky 车 · 无 PC 版</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sky 车">
+<meta name="theme-color" content="#05070a">
+<meta name="robots" content="noindex,nofollow"><!-- 公网上挂着, 但不让搜索引擎收录 -->
+<!--
+  ==========================================================================
+  car.html —— iPhone **完全不经过 PC** 用语音控九号平衡车 (2026-09-21)
+  ==========================================================================
+  这一页跟 face.html 是**两条独立的链**, 互不影响:
+
+    face.html (现役)      : PC 的 face_server.py 发页面 + PC 跑 ASR/大脑/TTS
+    car.html  (本页)      : 页面挂在公开 HTTPS, 手机本地跑 ASR/大脑/TTS + 蓝牙直连车
+
+  --------------------------------------------------------------------------
+  为什么要挂公开 HTTPS: getUserMedia / SpeechRecognition / Web Bluetooth 都要
+  **安全上下文**。PC 一关, face_server 就没了, 所以这页必须从公网 HTTPS 出。
+  ⚠️ **本页源码里没有任何密钥** —— DeepSeek key 由用户在页面上输一次, 存在
+     本机 localStorage, 只活在这台 iPhone 上, 不进 git、不进公网。
+  --------------------------------------------------------------------------
+  依赖 (缺一个都不行):
+    1. **beacio** Safari 扩展 —— iOS Safari 本体没有 Web Bluetooth, 靠它补上
+       (App Store 免费; 装完 设置→App→Safari→扩展→beacio 打开并允许)
+    2. iOS 自带 `webkitSpeechRecognition` (听, 走 Apple 服务器) —— 要联网
+    3. iOS 自带 `speechSynthesis` (说, 本地)
+  --------------------------------------------------------------------------
+  ★★ 三层安全闸 (与 talk.py / carbody.py 完全对齐, 一层都不能少) ★★
+     ① **本地急停**: 转写里出现急停词 → 立刻停车, **不问大脑**。
+        外加一颗**屏幕上常驻的大红"停"按钮** —— 这是最后一道, 比语音可靠。
+     ② **钳位**: 速度一律钳在 max_v/max_w = ±12%, 时长钳在 max_step/hold_sec。
+        **不信模型给的数**, 只信这里写死的常量。"前进/后退/左转/右转"速度固定取上限。
+     ③ **TTL**: 每条运动都有到期时刻, 到点自动归零。再加 12Hz 保活重发
+        (车的遥控协议 **~1s 收不到帧就自己停**)。
+        ⇒ 页面崩了 / 手机锁屏 / BLE 断了 → 车最多再走 max_hold_sec(10s) 秒;
+           连 BLE 都断了 → 车按协议 ~1s 自己停。
+  ⚠️⚠️ **绝不让云端 LLM 待在"停"的路径上** —— 一次网络抖动就是一秒失控。
+     本页的顺序写死为: 急停词 → 本地词表 → (都不中才) LLM。
+  ==========================================================================
+-->
+<style>
+  :root{color-scheme:dark}
+  html,body{margin:0;background:#05070a;color:#cfe3f2;
+            font:15px/1.6 -apple-system,"PingFang SC",system-ui,sans-serif;
+            -webkit-user-select:none;user-select:none;overscroll-behavior:none}
+  body{padding:12px;padding-top:calc(12px + env(safe-area-inset-top,0px));
+       padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  h1{font-size:15px;margin:0 0 10px;color:#8fd0ff;font-weight:600}
+
+  .row{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  button{flex:1;padding:14px 10px;border-radius:11px;border:1px solid #24506e;
+         background:#0d1c28;color:#cfe3f2;font-size:15px;font-weight:600}
+  button:active{background:#16303f}
+  button:disabled{opacity:.4}
+  button.on{background:#123a2a;border-color:#2f7d55;color:#7ff0b0}
+
+  /* 常驻大红急停 —— 最后一道防线, 任何时候都在 */
+  #estop{width:100%;padding:26px;font-size:30px;font-weight:800;letter-spacing:.3em;
+         color:#fff;background:#b3160f;border:2px solid #ff5a4d;border-radius:16px;
+         margin:4px 0 10px}
+  #estop:active{background:#e0221a}
+
+  #hud{border:1px solid #16303f;border-radius:11px;padding:10px 12px;background:#070d13;
+       font:12.5px/1.7 ui-monospace,Menlo,monospace;margin-bottom:9px;white-space:pre-wrap}
+  .ok{color:#5be08a}.bad{color:#ff6b6b}.warn{color:#ffc440}.dim{color:#5d7688}
+
+  #tr{white-space:pre-wrap;word-break:break-word;border:1px solid #16303f;border-radius:11px;
+      padding:10px 12px;background:#070d13;height:34vh;overflow-y:auto;font-size:13.5px}
+  #tr .u{color:#8fd0ff} #tr .c{color:#cfe3f2} #tr .s{color:#5be08a} #tr .e{color:#ff6b6b}
+
+  details{border:1px solid #16303f;border-radius:11px;padding:10px 12px;background:#070d13;
+          margin-top:9px;font-size:13px}
+  summary{cursor:pointer;color:#8fd0ff;font-weight:600}
+  input[type=password],input[type=text]{width:100%;box-sizing:border-box;padding:10px;
+        border-radius:9px;border:1px solid #24506e;background:#0b1620;color:#cfe3f2;
+        font:13px ui-monospace,Menlo,monospace;margin:8px 0}
+  label.chk{display:flex;align-items:center;gap:8px;color:#8fd0ff;margin:6px 0}
+</style>
+</head>
+<body>
+
+<h1>Sky 车 · 无 PC 版</h1>
+
+<button id="estop">停</button>
+
+<div id="hud">·</div>
+
+<div class="row">
+  <button id="bCar">连车</button>
+  <button id="bMic">开始听</button>
+</div>
+
+<div id="tr"></div>
+
+<details>
+  <summary>设置 / 自检</summary>
+  <label class="chk"><input type="checkbox" id="sim" checked> 模拟模式（不发蓝牙，只打印帧）</label>
+  <div>DeepSeek key（只存这台手机，不进源码/不进 git）</div>
+  <input type="password" id="key" placeholder="sk-...">
+  <div class="row" style="margin-top:2px">
+    <button id="bSave">保存 key</button>
+    <button id="bTest">帧自检</button>
+  </div>
+  <div id="diag" class="dim" style="white-space:pre-wrap;font-size:12px"></div>
+</details>
+
+<script>
+"use strict";
+
+/* ========================================================================
+   0) 常量 —— 与 ninebot.py / carbody.py / config.json 逐字对齐
+   ======================================================================== */
+const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const RX  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";   // 写(我们发指令)
+const TX  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";   // 通知(车回话, 本页只连不看)
+
+const CAR = {
+  max_v: 12, max_w: 12,            // 第二道闸: 速度上限 %。⚠️ 与 config.json car.max_v 对齐
+  step_sec: 0.8, max_step_sec: 1.5,
+  hold_sec: 6,  max_hold_sec: 10,  // max_hold_sec = **失联安全期**
+  stop_words: ["停", "停下", "停止", "站住", "别动", "急停", "不许动", "停车"],
+};
+const KEEP_MS = 80;                // 12.5Hz 保活(协议 ~1s 无帧就自己停, 富余很大)
+const LLM_URL = "https://api.deepseek.com/chat/completions";
+
+/* ========================================================================
+   1) 帧构建 —— 照抄 ninebot.py
+      帧: 0x55 0xAA | L | b1 | b2 | C | data... | ck0 ck1
+        L  = len(data)+2 ; ck = (sum(L..data) ^ 0xFFFF), ck0=低字节
+   ======================================================================== */
+function nbFrame(b1, b2, c, data) {
+  data = data || [];
+  const body = [data.length + 2, b1, b2, c].concat(data);
+  let s = 0;
+  for (const b of body) s = (s + b) & 0xFFFF;
+  const ck = (s ^ 0xFFFF) & 0xFFFF;
+  return new Uint8Array([0x55, 0xAA].concat(body, [ck & 0xFF, (ck >> 8) & 0xFF]));
+}
+const enterRemote = () => nbFrame(0x0A, 0x03, 0x7A, [0x01, 0x00]);
+function driveCmd(v, w) {
+  /* data = speed(2, 有符号 LE) + turn(2)
+     ⚠️ JS 的 & 作用于 int32, 负数照样取到正确的补码低 16 位(-12 & 0xFFFF = 65524) */
+  v = Math.round(v); w = Math.round(w);
+  const sp = v & 0xFFFF, tr = w & 0xFFFF;
+  return nbFrame(0x0A, 0x03, 0x7B, [sp & 0xFF, (sp >> 8) & 0xFF, tr & 0xFF, (tr >> 8) & 0xFF]);
+}
+const hex = (u8) => [...u8].map(b => b.toString(16).padStart(2, "0")).join(" ");
+
+/* ========================================================================
+   2) UI
+   ======================================================================== */
+const $ = (id) => document.getElementById(id);
+const trEl = $("tr");
+function tr(t, cls) {
+  const d = document.createElement("div");
+  d.className = cls || "c";
+  d.textContent = t;
+  trEl.appendChild(d);
+  while (trEl.childNodes.length > 300) trEl.removeChild(trEl.firstChild);   // 页面可能开一整天, 别让 DOM 无限涨
+  trEl.scrollTop = trEl.scrollHeight;
+}
+let hud = {};
+function draw() {
+  $("hud").textContent =
+    `蓝牙 ${hud.ble ? "已连" : "未连"}   听 ${hud.mic ? "开着" : "关着"}   ${hud.sim ? "模拟" : "实发"}\n` +
+    `命令 v=${hud.v || 0} w=${hud.w || 0}   TTL ${hud.ttl ? (hud.ttl / 1000).toFixed(1) + "s" : "-"}   ` +
+    `地面速度上限 ${CAR.max_v}%`;
+}
+
+/* ========================================================================
+   3) 蓝牙 —— 连车 + 12Hz 保活
+   ======================================================================== */
+let dev = null, rxChar = null, writing = false;
+
+function carDrop(why) {
+  tr("⚠️ 蓝牙断: " + why, "e");
+  rxChar = null;
+  if (dev && dev.gatt && dev.gatt.connected) { try { dev.gatt.disconnect(); } catch (e) {} }
+  dev = null;
+  hud.v = hud.w = 0; hud.ttl = 0; hud.ble = false;
+  draw();
+}
+
+async function connectCar() {
+  if (!navigator.bluetooth) {
+    tr("✗ 没有 navigator.bluetooth —— 先装 beacio 扩展并在 Safari 里允许本网站", "e");
+    return;
+  }
+  try {
+    dev = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [NUS] }],
+      optionalServices: [NUS],
+    });
+    dev.addEventListener("gattserverdisconnected", () => carDrop("车/系统断开"));
+    const srv = await dev.gatt.connect();
+    const svc = await srv.getPrimaryService(NUS);
+    rxChar = await svc.getCharacteristic(RX);
+    /* 进遥控模式 —— 不发这个, 后面的 drive 帧车不认 */
+    await rxChar.writeValueWithoutResponse(enterRemote());
+    hud.ble = true; draw();
+    tr("✓ 已连车 " + (dev.name || dev.id) + " , 已发进遥控模式", "s");
+  } catch (e) {
+    tr("✗ 连车失败: " + e.name + " — " + e.message, "e");
+    if (e.name === "NotFoundError")
+      tr("  车开机了吗? PC 的 carbody.py 是不是还占着车?", "dim");
+  }
+}
+
+/* ⚠️ 保活是 12.5Hz —— 模拟模式下**只在命令变化时打印**, 否则一秒钟刷 12 行把记录淹了 */
+let simV = null, simW = null;
+function writeDrive(v, w) {
+  if (hud.sim) {
+    if (v !== simV || w !== simW) { simV = v; simW = w; tr(`[模拟] ${hex(driveCmd(v, w))}`, "dim"); }
+    return;
+  }
+  if (!rxChar || writing) return;      // 上一帧没写完就丢了重来, 保活宁可丢帧也不排队
+  writing = true;
+  rxChar.writeValueWithoutResponse(driveCmd(v, w))
+    .catch((e) => carDrop("写失败 " + e.name))
+    .finally(() => { writing = false; });
+}
+
+/* ---- 运动状态: 当前命令 + 到期时刻, 由保活循环持续重发 ---- */
+let cmdV = 0, cmdW = 0, cmdEnd = 0;
+
+function keepTick() {
+  const now = performance.now();
+  let v = 0, w = 0;
+  if (now < cmdEnd) { v = cmdV; w = cmdW; }
+  else if (cmdEnd) { cmdV = cmdW = 0; cmdEnd = 0; tr("TTL 到 → 自动停", "s"); }
+  hud.v = v; hud.w = w; hud.ttl = Math.max(0, cmdEnd - now); draw();
+  if (rxChar || hud.sim) writeDrive(v, w);
+}
+setInterval(keepTick, KEEP_MS);
+
+function hardStop(why) {
+  cmdV = cmdW = 0; cmdEnd = 0;
+  if (rxChar) writeDrive(0, 0);
+  if (hud.sim) hud.v = hud.w = 0, draw();
+  tr("■ 停 " + (why || ""), "s");
+}
+const sec = (x, dflt, cap) => {
+  const n = Number(x);
+  return Math.max(0.1, Math.min(n > 0 ? n : dflt, cap));   // 非数/非正 → 用默认; 一律钳到上限
+};
+
+/* 把"动作"落成命令。doWhat: forward|back|left|right|stop */
+function applyCmd(doWhat, secs) {
+  const now = performance.now();
+  if (doWhat === "stop") { hardStop("(口令)"); return "停止"; }
+  let v = 0, w = 0;
+  /* ⚠️ 单步速度**写死取上限**, 不听调用方给的数 —— 同 talk.py。 */
+  if (doWhat === "forward") v = CAR.max_v;
+  else if (doWhat === "back") v = -CAR.max_v;
+  else if (doWhat === "left") w = CAR.max_w;
+  else if (doWhat === "right") w = -CAR.max_w;
+  else return "";
+  const t = sec(secs, CAR.step_sec, CAR.max_step_sec);
+  const cv = Math.max(-CAR.max_v, Math.min(CAR.max_v, v));
+  const cw = Math.max(-CAR.max_w, Math.min(CAR.max_w, w));
+  cmdV = cv; cmdW = cw; cmdEnd = now + t * 1000;
+  return `${doWhat} v=${cv} w=${cw} ${t.toFixed(1)}s`;
+}
+
+/* ========================================================================
+   4) 本地意图 —— 第一级, 0 延时, 覆盖绝大多数控车命令
+   ⚠️ 顺序: **先急停, 再方向**。急停永远优先。
+   ⚠️⚠️ talk.py 的 is_stop 是**裸子串**匹配, 「不停」「停车场」会误触发。这里修掉:
+      匹配处前一个字是「不」就不算(不停/不要停 = 别停), 另把「停车场」整词摘掉。
+   ======================================================================== */
+function norm(s) {
+  return String(s || "").replace(/[\s，。、,.;:!?！？：；~·「」『』“”"']/g, "");
+}
+function isStop(text) {
+  let t = norm(text);
+  if (!t) return false;
+  t = t.replace(/停车场/g, "");           // 「停车场」不是让你停
+  for (const w of CAR.stop_words) {
+    let i = t.indexOf(w);
+    while (i >= 0) {
+      /* 往前看**两个字**: 「不要停」的「不」隔着一个「要」——
+         只看前一个字的话，实测「不要停」会被判成急停。 */
+      const prev2 = t.slice(Math.max(0, i - 2), i);
+      if (prev2.indexOf("不") < 0) return true;
+      i = t.indexOf(w, i + 1);
+    }
+  }
+  return false;
+}
+/* 长词在前 —— 「左转」必须先于「左」被匹配到 */
+const LOCAL = [
+  ["前进", "forward"], ["往前", "forward"], ["向前", "forward"], ["前走", "forward"],
+  ["出发", "forward"], ["走吧", "forward"], ["过来", "forward"], ["走", "forward"],
+  ["后退", "back"], ["往后", "back"], ["向后", "back"], ["倒车", "back"], ["退后", "back"],
+  ["左转", "left"], ["往左", "left"], ["向左", "left"], ["左", "left"],
+  ["右转", "right"], ["往右", "right"], ["向右", "right"], ["右", "right"],
+];
+function localIntent(text) {
+  const t = norm(text);
+  for (const [k, c] of LOCAL) if (t.includes(k)) return c;
+  return null;
+}
+
+/* ========================================================================
+   5) 云端大脑 —— 只在本地没命中时才走。~0.5s
+   ⚠️⚠️ `thinking:{type:"disabled"}` 是**必须**的: deepseek-flash 默认开思考,
+      实测不关的话 max_tokens 会被 reasoning 吃光, **正文一个字都拿不到**。
+   ======================================================================== */
+const SYS = "你是车载助手。只回一个词, 不要标点不要解释, 从这几个里选: " +
+            "前进 后退 左转 右转 停止 无。";
+const LLMW = ["前进", "后退", "左转", "右转", "停止", "停止"];
+const LLMAP = { "前进": "forward", "后退": "back", "左转": "left", "右转": "right", "停止": "stop" };
+
+async function askLLM(text) {
+  const key = localStorage.getItem("ds_key") || "";
+  if (!key) { tr("(没设 DeepSeek key, 忽略这句)", "dim"); return; }
+  const t0 = performance.now();
+  try {
+    const r = await fetch(LLM_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+      body: JSON.stringify({
+        model: "deepseek-flash", stream: true, temperature: 0, max_tokens: 16,
+        thinking: { type: "disabled" },
+        messages: [{ role: "system", content: SYS }, { role: "user", content: text }],
+      }),
+    });
+    if (!r.ok) { tr("大脑 HTTP " + r.status + " " + (await r.text()).slice(0, 120), "e"); return; }
+    const rd = r.body.getReader(), dec = new TextDecoder();
+    let acc = "", buf = "", acted = false;
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n"); buf = lines.pop();
+      for (const ln of lines) {
+        if (!ln.startsWith("data: ")) continue;
+        const p = ln.slice(6).trim();
+        if (p === "[DONE]") continue;
+        let d; try { d = JSON.parse(p); } catch (e) { continue; }
+        const c = (d.choices || [])[0];
+        const piece = c && c.delta && c.delta.content;
+        if (!piece) continue;
+        acc += piece;
+        /* ⚠️ 边收边判: 一看到命令词就立刻发车, 不等它把话说完 */
+        if (!acted) {
+          for (const k of LLMW) {
+            if (acc.includes(k)) {
+              acted = true;
+              const ms = performance.now() - t0;
+              const what = LLMAP[k];
+              tr(`大脑 ${ms.toFixed(0)}ms → ${k}`, "c");
+              doAction(what);
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (!acted) tr("大脑说「" + acc.trim() + "」→ 不动", "dim");
+  } catch (e) {
+    tr("大脑失败: " + e.name + " — " + e.message, "e");
+  }
+}
+
+/* ========================================================================
+   6) 语音: 听 (iPhone 自带) + 说 (iPhone 自带)
+   ======================================================================== */
+function doAction(what) {
+  const line = applyCmd(what);
+  if (line) tr("→ " + line, "s");
+  say({ forward: "走", back: "后退", left: "左转", right: "右转", stop: "停了" }[what] || "");
+}
+function say(t) {
+  if (!t || !window.speechSynthesis) return;
+  try {
+    const u = new SpeechSynthesisUtterance(t);
+    u.lang = "zh-CN"; u.rate = 1.1;
+    speechSynthesis.cancel();      // ⚠️ 不 cancel 会排队积压, 说一句等三句
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false;
+
+function startMic() {
+  if (!SR) { tr("✗ 这个浏览器没有 SpeechRecognition", "e"); return; }
+  if (!rec) {
+    rec = new SR();
+    rec.lang = "zh-CN";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (!r.isFinal) continue;
+        const text = (r[0].transcript || "").trim();
+        if (text) handleText(text);
+      }
+    };
+    /* ⚠️ iOS 上识别会因为静音自己结束 —— 只要还开着听, 就重起 */
+    rec.onend = () => { if (listening) setTimeout(() => { if (listening) { try { rec.start(); } catch (e) {} } }, 250); };
+    rec.onerror = (e) => {
+      tr("识别错误: " + e.error, "e");
+      if (e.error === "not-allowed") { listening = false; syncMic(); }
+    };
+  }
+  listening = true;
+  try { rec.start(); } catch (e) {}
+  syncMic();
+  say("在听");                 // ⚠️ 顺便解锁 speechSynthesis(需要一次真手势)
+  tr("🎤 开始听 (再说一次「停止听」或点按钮关掉)", "dim");
+}
+function stopMic() {
+  listening = false;
+  if (rec) { try { rec.stop(); } catch (e) {} }
+  syncMic();
+  hardStop("(关麦)");          // ⚠️ 关麦必须同时停车
+  tr("🎤 关麦 + 停车", "dim");
+}
+function syncMic() { $("bMic").textContent = listening ? "停止听" : "开始听"; $("bMic").classList.toggle("on", listening); hud.mic = listening; draw(); }
+
+/* 急停词命中 → 立刻停, **不问大脑** */
+function handleText(text) {
+  tr("你: " + text, "u");
+  if (isStop(text)) { tr("★ 急停口令命中 → 直接停", "s"); hardStop("(急停口令)"); return; }
+  const local = localIntent(text);
+  if (local) { tr("本地 → " + local, "c"); doAction(local); return; }
+  askLLM(text);                // 都不中才走云端
+}
+
+/* ========================================================================
+   7) 接线
+   ======================================================================== */
+$("estop").addEventListener("click", () => hardStop("(按钮)"));
+$("bCar").addEventListener("click", connectCar);
+$("bMic").addEventListener("click", () => (listening ? stopMic() : startMic()));
+$("bSave").addEventListener("click", () => {
+  const v = $("key").value.trim();
+  if (!v) { localStorage.removeItem("ds_key"); tr("已清空 key", "dim"); return; }
+  localStorage.setItem("ds_key", v);
+  $("key").value = "";
+  tr("✓ key 已存本机 (localStorage), 不进源码也不出这台手机", "s");
+});
+$("sim").addEventListener("change", (e) => { hud.sim = e.target.checked; draw(); tr("模拟模式 " + (hud.sim ? "开" : "关"), "dim"); });
+$("bTest").addEventListener("click", () => {
+  const rows = [
+    ["进遥控(0x7A)", enterRemote()],
+    ["停 (v=0 w=0)", driveCmd(0, 0)],
+    ["前 (v=12 w=0)", driveCmd(12, 0)],
+    ["后 (v=-12 w=0)", driveCmd(-12, 0)],
+    ["左 (v=0 w=12)", driveCmd(0, 12)],
+    ["右 (v=0 w=-12)", driveCmd(0, -12)],
+  ];
+  let out = "";
+  for (const [k, f] of rows) out += k.padEnd(16, " ") + hex(f) + "\n";
+  out += "\n急停词自测(应为 停/不停→否/停车场→否):\n";
+  for (const s of ["停一下", "往前走", "不要停", "停车场在哪", "别动"])
+    out += `  ${s.padEnd(8, " ")} → ${isStop(s) ? "停" : "否"}\n`;
+  $("diag").textContent = out;
+  tr("自检已出，见「设置」里", "dim");
+});
+
+/* ⚠️ 页面被切走/锁屏 → 必须停车。人看不见车的时候, 车不该还在走。 */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { hardStop("(页面切走)"); stopMic(); }
+});
+window.addEventListener("pagehide", () => hardStop("(页面关闭)"));
+
+hud.sim = true;                 // 默认模拟! 要先"连车"再手动关掉, 免得误发
+hud.ble = false; hud.mic = false; hud.v = hud.w = 0; hud.ttl = 0;
+draw();
+tr("先装 beacio 扩展 → 点「连车」→ 点「开始听」。", "dim");
+tr("⚠️ 默认是**模拟模式**, 只打印帧不发蓝牙。确认帧对了再取消勾选。", "warn");
+if (localStorage.getItem("ds_key")) tr("(已存 DeepSeek key)", "dim");
+</script>
+</body>
+</html>
