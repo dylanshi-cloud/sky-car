@@ -744,6 +744,29 @@ $("dial").addEventListener("pointercancel", () => $("dial").classList.remove("dr
    3) 蓝牙 —— 连车 + 12Hz 保活
    ======================================================================== */
 let dev = null, rxChar = null, writing = false;
+/* ⚠️⚠️ 写特征值的两种模式 —— 这是本页与**能跑通的 PC 路径之间唯一的实质差异**(2026-09-21 真机定位):
+     · `carbody.py` → `ai_car.py` 的 `CarBLE.write_drive()` 用的是 **`response=True`(等车确认)**;
+     · 本页原来从头到尾用 **`writeValueWithoutResponse`(不等确认)**。
+   两种在**空闲时都能跑**(链路稳、保活正常), 但一收到**真正的运动帧**车就把链路掐了
+   (`gattserverdisconnected` → 页面上"⚠️ 蓝牙断: 车/系统断开")。
+   ⚠️ PC 侧对照实验证明了**不是车的问题**: 同样的帧、同样 12% 持续前进, PC 从头到尾 `ble=up`。
+   ⇒ 改成**优先带回应的写法**, 不被支持(`NotSupportedError`)再退回不带回应。
+   `writeMode` 每次新连接都要清回 null —— 换一台设备可能支持得不一样。 */
+let writeMode = null;                  // null=还没定 / "ack"=等确认 / "noack"=不等
+function bleWrite(u8) {
+  if (writeMode === "noack") return rxChar.writeValueWithoutResponse(u8);
+  if (writeMode === "ack")   return rxChar.writeValue(u8);
+  return rxChar.writeValue(u8).then(
+    () => { writeMode = "ack"; dbg("蓝牙写法: 带回应(ack)"); },
+    (e) => {
+      if (e && e.name === "NotSupportedError") {      // 这个特征不支持带回应写
+        writeMode = "noack";
+        dbg("蓝牙写法: 这个特征不支持带回应, 退回不带回应");
+        return rxChar.writeValueWithoutResponse(u8);
+      }
+      throw e;
+    });
+}
 /* ---- 断线自愈(2026-09-21 真机踩到 "蓝牙断: 车/系统断开" 之后补的) ----
    病灶不在这一页: 车连同之后, 页面一被 iOS 挂起(锁屏/切走/省电), 12.5Hz 保活就停了,
    车那边很快把我们踢掉 → `gattserverdisconnected`。
@@ -788,13 +811,14 @@ async function connectCar() {
       optionalServices: [NUS],
     });
     lastDev = dev;                       // 记住它, 断了靠它自愈
+    writeMode = null;                    // 新连接 = 重新探一次写法(换台车可能支持得不一样)
     if (reconTimer) { clearTimeout(reconTimer); reconTimer = null; reconN = 0; }
     dev.addEventListener("gattserverdisconnected", () => carDrop("车/系统断开"));
     const srv = await dev.gatt.connect();
     const svc = await srv.getPrimaryService(NUS);
     rxChar = await svc.getCharacteristic(RX);
     /* 进遥控模式 —— 不发这个, 后面的 drive 帧车不认 */
-    await rxChar.writeValueWithoutResponse(enterRemote());
+    await bleWrite(enterRemote());
     hud.ble = true; $("bCar").classList.add("on"); draw();
     tr("✓ 已连车 " + (dev.name || dev.id) + " , 已发进遥控模式", "s");
   } catch (e) {
@@ -820,7 +844,8 @@ function reconStep() {
       const svc = await srv.getPrimaryService(NUS);
       const ch  = await svc.getCharacteristic(RX);
       dev = lastDev; rxChar = ch;
-      await ch.writeValueWithoutResponse(enterRemote());
+      writeMode = null;                 // 重连 = 重新探
+      await bleWrite(enterRemote());
       hud.ble = true; $("bCar").classList.add("on"); draw();
       tr("✓ 已自动重连(第 " + reconN + " 次)", "s");
       reconN = 0;
@@ -840,7 +865,7 @@ function writeDrive(v, w) {
   }
   if (!rxChar || writing) return;      // 上一帧没写完就丢了重来, 保活宁可丢帧也不排队
   writing = true;
-  rxChar.writeValueWithoutResponse(driveCmd(v, w))
+  bleWrite(driveCmd(v, w))
     .catch((e) => carDrop("写失败 " + e.name))
     .finally(() => { writing = false; });
 }
