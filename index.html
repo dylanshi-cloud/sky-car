@@ -217,7 +217,10 @@
      ⚠️ 护圈是 box-shadow 的 0 0 0 Npx(spread)描的 —— 它**跟着 border-radius 一起变形**,
         所以描出来的还是一圈同形状的轮廓, 不是个方框。它是"底座", 不是描边。
      ⚠️ 它**常驻在屏幕上**, 不许藏进 <details> —— 出事时手要去摸的就这一个东西。 */
-  #estop{position:absolute;left:50%;top:56px;margin-left:-18px;width:36px;height:36px;
+  /* ⚠️ 2026-09-21 用户要求「停止按钮放在右侧」—— 它原来蹲在两眼正中(那是"鼻子"的位置),
+     那个位置现在让给摇杆。放右侧是给**拇指**留的: 右手握机, 拇指自然落在屏幕右缘。
+     ⚠️ 热区(::before 往外扩 12px)探到右边缘 388px, 屏宽 390 —— 留 2px, 不出屏。 */
+  #estop{position:absolute;right:14px;top:31px;width:36px;height:36px;
          padding:0;border:0;
          border-radius:10% 10% 34% 34% / 12% 12% 44% 44%;
          background:radial-gradient(ellipse at 38% 24%,#ff9d8e 0%,#ff4436 42%,#c01508 76%,#7a0a03 100%);
@@ -241,6 +244,34 @@
                     inset 0 5px 9px rgba(60,0,0,.72),
                     0 0 0 3px #101a24, 0 0 0 4px var(--line2),
                     0 2px 4px rgba(0,0,0,.6)}
+
+  /* ---- 摇杆: 长在**鼻子**位置的手动操纵杆(前后 + 左右转) ----
+     ⚠️⚠️ 宽度被**双眼之间的空档锁死**: 瞳距 180 − 眼宽 88 = **92px**。取 88 是留 2px 边,
+        再宽就压到眼睛(眼睛的 clip-path 底边不收缩, 是满宽的, 蹭上就是"鼻子糊在眼睛上")。
+     ⚠️ touch-action:none —— 不写的话手指一拖整个页面跟着滚, 杆就抓不住了(同 #dial)。
+     ⚠️ 底盘/护圈/球面光的写法与 #dial 逐条一致(径向渐变 + box-shadow spread 描环),
+        一眼能看出这俩是同一套控件语言。 */
+  #stick{position:absolute;left:50%;top:5px;margin-left:-44px;width:88px;height:88px;
+         border-radius:50%;touch-action:none;
+         background:radial-gradient(circle at 38% 26%,#4d6f86 0%,#263b4e 34%,#111e2a 66%,#070c12 100%);
+         box-shadow:inset 0 3px 2px rgba(255,255,255,.22),
+                    inset 0 -8px 14px rgba(0,0,0,.78),
+                    0 0 0 3px #0d141c, 0 0 0 4px var(--line2),
+                    0 8px 16px rgba(0,0,0,.7)}
+  /* 十字刻度(上=前 下=后 左右=转)。⚠️ 两个伪元素各画一条直线, 不引多余 DOM。
+     ⚠️ 用 rgba 的淡蓝而不是纯灰 —— 在深蓝底上灰线会发脏。 */
+  #stick::before,#stick::after{content:"";position:absolute;background:rgba(120,170,205,.17)}
+  #stick::before{left:50%;top:9px;bottom:9px;width:1px;margin-left:-.5px}
+  #stick::after{top:50%;left:9px;right:9px;height:1px;margin-top:-.5px}
+  /* 只有杆头这一层会动(同 #dialKnob 的分工: 底盘不动, 让指针走)。 */
+  #stickKnob{position:absolute;left:50%;top:50%;width:32px;height:32px;margin:-16px 0 0 -16px;
+             border-radius:50%;pointer-events:none;
+             background:radial-gradient(circle at 38% 28%,#eafcff 0%,var(--acc) 34%,#0d5a78 78%,#062a38 100%);
+             box-shadow:0 0 10px 2px rgba(79,201,240,.5),
+                        inset 0 -3px 6px rgba(0,0,0,.5), 0 3px 7px rgba(0,0,0,.6);
+             transition:transform .09s ease-out}
+  /* ⚠️ 手指按着的时候**不许有缓动** —— 有 transition 的话杆头追不上手指, 看着像"拖不动" */
+  #stick.drag #stickKnob{transition:none}
 
   .ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.dim{color:var(--dim)}
   /* 车辆状态读数 —— **折叠进最下面那个「设置」里了**(用户要求), 平时不占屏幕。
@@ -378,12 +409,15 @@
   </div><!-- /#rcol -->
 </div>
 
-<!-- 脸: 变形金刚那路数的角形眼(金属框 + 青辉 + 白色亮核) + 中间的急停大红按钮。
+<!-- 脸: 变形金刚那路数的角形眼(金属框 + 青辉 + 白色亮核)
+     + **两眼正中那根摇杆(鼻子)** + **右侧的急停大红钮**。
      ⚠️ 急停按钮**必须常驻在屏幕上**, 不许藏进 <details> 或需要滚动才看得到 —— 它比语音可靠。 -->
 <div id="face">
   <div class="eye"><i class="glow"></i><i class="pupil"></i></div>
   <div class="eye" id="eye2"><i class="glow"></i><i class="pupil"></i></div>
-  <!-- 就是一个 3D 急停蘑菇钮。没有文字, 也没有鼻子。 -->
+  <!-- 手动操纵杆。没有文字: 上=前 下=后 左右=转, 靠盘面那两条十字刻度读。 -->
+  <div id="stick" aria-label="手动摇杆"><i id="stickKnob"></i></div>
+  <!-- 3D 急停蘑菇钮, 挂在**右侧**。没有文字。 -->
   <button id="estop" aria-label="急停"></button>
 </div>
 
@@ -618,10 +652,16 @@ function writeDrive(v, w) {
 
 /* ---- 运动状态: 当前命令 + 到期时刻, 由保活循环持续重发 ---- */
 let cmdV = 0, cmdW = 0, cmdEnd = 0;
+/* 摇杆的四个状态量。⚠️ 声明放这儿(而不是摇杆那一节里)是有意的 —— keepTick/hardStop 都要用,
+   若声明晚于它们的**首次执行**, 就会撞上 let 的暂时性死区(TDZ)直接 ReferenceError。 */
+let stickHeld = false, stickV = 0, stickW = 0, stickPtr = null, stickLab = "";
 
 function keepTick() {
   const now = performance.now();
   let v = 0, w = 0;
+  /* ⚠️⚠️ 摇杆**按着不动**时不会有 pointermove, 光靠事件续命 320ms 后就 TTL 停车了 ——
+     手指还按着车却自己停了, 这是最要命的一种"看着对、其实错"。所以每帧在这里补续。 */
+  if (stickHeld && (stickV || stickW)) cmdEnd = now + STICK_TTL;
   if (now < cmdEnd) { v = cmdV; w = cmdW; }
   else if (cmdEnd) { cmdV = cmdW = 0; cmdEnd = 0; dbg("TTL 到 → 自动停"); }   // 定时器到期 = 后台信息
   /* ⚠️ 这里是全页唯一持续发帧的地方, 所以**闸②的钳位放在这儿最靠得住**:
@@ -636,6 +676,7 @@ function keepTick() {
 setInterval(keepTick, KEEP_MS);
 
 function hardStop(why) {
+  stickReset();                 // ⚠️ 停车必须**连摇杆一起松掉** —— 否则杆还按着, 下一帧又续上了
   cmdV = cmdW = 0; cmdEnd = 0;
   if (rxChar) writeDrive(0, 0);
   if (hud.sim) hud.v = hud.w = 0, draw();
@@ -668,6 +709,108 @@ function applyCmd(doWhat, secs) {
   cmdV = cv; cmdW = cw; cmdEnd = now + t * 1000;
   return `${doWhat} v=${cv} w=${cw} ${t.toFixed(1)}s`;
 }
+
+/* ========================================================================
+   3.4) 摇杆 —— 长在"鼻子"位置的**手动操纵杆**(前后 + 左右转)
+   ⚠️⚠️ 用户的**角度规则**(原话): "左右转弯的控制需要在往左右偏角大于 15 度的时候发生",
+       "在正前正后的 30 度夹角范围内的推动, 都算作向正前或正后运动"。落到实现:
+         · 左右偏角 def ≤ TURN_DEAD(15°)  → 转向量**恒为 0**(防止"想直走却拧出去")
+         · def 从 15° 线性升到 90°        → 转向量 0 → 满(90° 就是纯横向, 满舵)
+         · def ≤ STRAIGHT_CONE(30°)       → **前进/后退速度按满档, 不打折扣**
+             ("30° 锥内算正前/正后"多半就是这个意思: 不是让速度乘 cos, 而是给个不打折的锥)
+         · 30° → 90°                      → 前进分量线性衰减到 0(纯横向 = 原地转, 不往前走)
+   ⚠️ 方向约定**照抄 applyCmd**: v>0 前 / v<0 后 / **w>0 左 / w<0 右**。
+      所以杆往右推(θ>0) → w 取**负** = 右转。写反了就是"往右推它往左拧"。
+   ⚠️ 摇杆**绕开 applyCmd**: 它是连续量, 不是"走 0.8 秒"那种一次性命令。但它同样受
+      闸②(keepTick 每帧钳位)和闸③(TTL)管 —— 这两道是安全底线, 不因为多了一个输入源而松。
+   ======================================================================== */
+const STICK_DEAD_M  = 0.16;   // 死区: 杆头推不到行程的 16% 就当没推(防手抖)
+const TURN_DEAD     = 15;     // 左右偏角 ≤ 15° 不转
+const STRAIGHT_CONE = 30;     // 正前/正后 30° 锥内, 前进分量按满档
+const STICK_TRAVEL  = 26;     // 杆头最大行程(px)。26 + 杆头半径 16 = 42 < 底盘半径 44, 不越界
+const STICK_TTL     = 320;    // 手指停住不动时, 每帧续命多长
+
+const stickEl = $("stick"), knobEl = $("stickKnob");
+function stickKnobTo(dx, dy) {
+  knobEl.style.transform = "translate(" + dx.toFixed(1) + "px," + dy.toFixed(1) + "px)";
+}
+/* 由杆头位移算出 (stickV, stickW); 返回给对话框显示的那句话(没在动就返回 "") */
+function stickCalc(dx, dy) {
+  const m = Math.min(1, Math.sqrt(dx * dx + dy * dy) / STICK_TRAVEL);
+  if (m < STICK_DEAD_M) { stickV = stickW = 0; return ""; }
+  /* θ: 0°=正上, ±90°=正左右, ±180°=正下 */
+  const th  = Math.atan2(dx, -dy) * 180 / Math.PI;
+  const def = Math.abs(th) <= 90 ? Math.abs(th) : 180 - Math.abs(th);   // 左右偏角
+  const fwd = Math.abs(th) <= 90;
+  const tf  = def <= TURN_DEAD ? 0
+            : Math.min(1, (def - TURN_DEAD) / (90 - TURN_DEAD));
+  const ff  = def <= STRAIGHT_CONE ? 1
+            : Math.max(0, 1 - (def - STRAIGHT_CONE) / (90 - STRAIGHT_CONE));
+  const ms  = Math.min(1, (m - STICK_DEAD_M) / (1 - STICK_DEAD_M));     // 推得越远越有劲
+  stickV = (fwd ? 1 : -1) * CAR.max_v * ff * ms;
+  stickW = (th > 0 ? -1 : 1) * CAR.max_w * tf * ms;                     // ⚠️ 见上: w>0 是左转
+  if (Math.abs(stickV) < 1 && Math.abs(stickW) < 1) return "";
+  /* 给对话框看的那句话。⚠️ 只有**方向档位变了**才打印(见 stickMove), 不然连续量会把记录刷爆 */
+  if (Math.abs(stickV) < 1) return stickW > 0 ? "原地左转" : "原地右转";
+  return (fwd ? "前进" : "后退") + (tf > 0 ? (stickW > 0 ? " · 左转" : " · 右转") : "");
+}
+/* 松杆/回中/急停都走这儿。⚠️ why 只在**刚才真的在动**时才打印, 否则原地一戳就刷一行"停"。 */
+function stickStop(why) {
+  const was = !!stickLab;
+  stickLab = ""; stickV = stickW = 0;
+  cmdV = cmdW = 0; cmdEnd = 0;
+  if (rxChar) writeDrive(0, 0);
+  if (hud.sim) hud.v = hud.w = 0, draw();
+  if (was) tr("■ 停 (" + why + ")", "s");
+}
+function stickReset() {
+  stickPtr = null; stickHeld = false; stickLab = ""; stickV = stickW = 0;
+  stickEl.classList.remove("drag");
+  stickKnobTo(0, 0);
+}
+function stickMove(e) {
+  const r = stickEl.getBoundingClientRect();
+  let dx = e.clientX - (r.left + r.width / 2);
+  let dy = e.clientY - (r.top + r.height / 2);
+  const d = Math.sqrt(dx * dx + dy * dy);
+  if (d > STICK_TRAVEL) { dx = dx / d * STICK_TRAVEL; dy = dy / d * STICK_TRAVEL; }
+  stickKnobTo(dx, dy);
+  const lab = stickCalc(dx, dy);
+  if (lab) {
+    /* ⚠️ 只有**档位变了**才打印。杆是连续量, 每帧都写会把对话框刷爆(60fps = 一秒 60 行)。 */
+    if (lab !== stickLab) {
+      tr("→ " + lab, "s");
+      dbg("摇杆 v=" + stickV.toFixed(1) + " w=" + stickW.toFixed(1));
+      stickLab = lab;
+    }
+    cmdV = stickV; cmdW = stickW; cmdEnd = performance.now() + STICK_TTL;
+  } else {
+    /* ⚠️ 放在**改 stickLab 之前**调用 —— stickStop 靠旧的 stickLab 判断"刚才是不是真在动" */
+    stickStop("摇杆回中");
+  }
+}
+stickEl.addEventListener("pointerdown", (e) => {
+  if (stickPtr !== null) return;                 // 只认第一根手指, 第二根一律忽略
+  stickPtr = e.pointerId; stickHeld = true; stickLab = "";
+  stickEl.classList.add("drag");
+  try { stickEl.setPointerCapture(e.pointerId); } catch (err) {}
+  stickMove(e);
+  e.preventDefault();
+});
+stickEl.addEventListener("pointermove", (e) => {
+  if (e.pointerId !== stickPtr) return;
+  stickMove(e);
+  e.preventDefault();
+});
+function stickUp(e) {
+  if (e.pointerId !== stickPtr) return;
+  stickPtr = null; stickHeld = false;
+  stickEl.classList.remove("drag");
+  stickKnobTo(0, 0);
+  stickStop("摇杆松手");
+}
+stickEl.addEventListener("pointerup", stickUp);
+stickEl.addEventListener("pointercancel", stickUp);
 
 /* ========================================================================
    3.5) 取景器 —— 手机架在车上, 看着画面开(第一视角)
