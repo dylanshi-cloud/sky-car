@@ -813,6 +813,7 @@ function bleWrite(u8) {
       早过期了"这种**推断** —— 用了下面的快连(400ms)之后那个推断本来也就不成立了。 */
 let lastDev = null;                       // 上次挑中的车(断了拿它重连)
 let reconTimer = null, reconN = 0, dropN = 0;   // dropN = 累计掉线次数(HUD 里看得见)
+let lastDropWhy = "", lastDropAt = -1e9;        // 断线提示的去重(见 carDrop 里那段)
 const RECON_MS = 1500, RECON_MAX = 40;    // 常态 1.5s 一次, 最多 40 次(≈1 分钟)
 /* ⚠️ **前两次快连(400ms)**: 掉线到重连之间车是"没人管"的, 这个窗口越短越好 ——
    用户体感的「时断时续」主要就是这个窗口。但也不能一直 400ms: 车真关机时会
@@ -822,7 +823,16 @@ const reconDelay = () => (reconN <= RECON_FAST_N ? RECON_MS_FAST : RECON_MS);
 
 function carDrop(why) {
   dropN++;
-  tr("⚠️ 蓝牙断: " + why, "e");
+  /* ⚠️⚠️ 这条**必须让用户看见**(链路断 = 车停了, 属于"能听见"的事件), 但**绝不能刷屏**:
+     写失败时页面会连着走"重连→再失败"的循环, 每 400ms 一句能在两秒内把整个对话记录淹掉
+     (实测: 1.5 秒吐了 5 句一模一样的 "写失败 NotSupportedError") —— 那时候用户要看的
+     「帧数涨不涨」反倒被埋了。⇒ **同一原因 5 秒内只报一次**; 重连成功后清掉记录,
+     所以"好了之后又断"仍然看得见。 */
+  const nowMs = performance.now();
+  if (why !== lastDropWhy || nowMs - lastDropAt > 5000) {
+    lastDropWhy = why; lastDropAt = nowMs;
+    tr("⚠️ 蓝牙断: " + why, "e");
+  }
   /* ⚠️ 松开"写卡住"这个锁 —— 否则重连回来第一帧就被它挡掉。 */
   writing = false;
   rxChar = null;
@@ -871,10 +881,22 @@ async function connectCar() {
     /* 进遥控模式 —— 不发这个, 后面的 drive 帧车不认 */
     await bleWrite(enterRemote());
     noCarHinted = false;
+    lastDropWhy = "";                    // 链路活了 ⇒ 下次再断是**新信息**, 要重新报
     hud.ble = true; $("bCar").classList.add("on"); draw();
     tr("✓ 已连车 " + (dev.name || dev.id) + " , 已发进遥控模式", "s");
     tr("蓝牙写法: " + (writeMode === "ack" ? "带回应" : "不带回应") +
        (FORCE_ACK ? " (网址 ?ack=1 指定)" : ""), "dim");
+    /* ⚠️ 连上 3s 后把**帧计数**直接报到对话记录里。
+       这是"连上了但推摇杆车不动"唯一的判据(帧数不涨=没发出去 / 涨了=发了车不认, 两种病治法完全不同),
+       而「车辆状态」折在「设置」里, 用户根本翻不到。它属于「按钮互动的结果」, 不是后台信息。 */
+    setTimeout(() => {
+      if (!hud.ble) return;                       // 中途断了就别再报, 断线那条消息更准
+      const rate = (txN / 3).toFixed(1);
+      const bad = txErr > 0 || txN <= 1;
+      tr("蓝牙自检: 3 秒发了 " + txN + " 帧(" + rate + "/秒) · 失败 " + txErr + " · 断 " + dropN
+         + (bad ? " ★帧没发出去, 问题在这条链上" : " —— 帧在流; 车还不动就是帧本身车不认"),
+         bad ? "e" : "dim");
+    }, 3000);
   } catch (e) {
     dbg("连车失败: " + e.name + " — " + e.message);
     tr("✗ 连车失败（" + e.name + "）", "e");
@@ -905,6 +927,7 @@ function reconStep() {
          这一帧把"清零"这件事**在链路层也落实一遍**(而不是等 keepTick 下一个 80ms 周期)。 */
       await bleWrite(driveCmd(0, 0));
       noCarHinted = false;
+      lastDropWhy = "";                  // 同上: 重连成功 = 断线那一串结束, 提示额度重置
       hud.ble = true; $("bCar").classList.add("on"); draw();
       tr("✓ 已自动重连(第 " + reconN + " 次)", "s");
       dbg("重连耗时 = 约 " + reconN + " 次尝试后成功(快连前 " + RECON_FAST_N + " 次是 400ms 档)");
@@ -1927,8 +1950,20 @@ hud.ble = false; hud.mic = false; hud.v = hud.w = 0; hud.ttl = 0;
 
 dialDraw();                     // 把圆盘画成当前上限(含上面刚恢复的 localStorage 值)
 draw();
-tr("先装 beacio → 点右侧蓝牙图标连车 → 点麦克风图标开始听。", "dim");
-tr("⚠️ 默认是**模拟模式**, 只打印帧不发蓝牙。确认帧对了再取消勾选。", "warn");
+/* ⚠️ 开场这几句要**分平台**说, 而且必须说真话:
+   · iOS Safari 本体没有 Web Bluetooth, 靠 beacio 扩展补 —— 所以要"装扩展";
+     桌面 Chrome/Edge 本来就有, 让它去装 beacio 是**指着错的方向找人**。
+   · 「模拟模式」的默认值**已经改成关了**(见 #sim 那段注释)。这里原来还写着
+     "默认是模拟模式", 与事实**正好相反** —— 而它是用户排查时第一眼看到的话, 必须删掉。
+   · 浏览器不给蓝牙(非安全上下文)是最常见的一种"点了没反应", 所以先自检一句。 */
+if (/iPad|iPhone|iPod/.test(navigator.userAgent))
+  tr("先装 beacio 扩展 → 点右侧蓝牙图标连车 → 点麦克风图标开始听。", "dim");
+else
+  tr("点右侧蓝牙图标连车 → 点麦克风图标开始听。", "dim");
+if (!navigator.bluetooth)
+  tr("⚠️ 这个地址拿不到蓝牙 —— 换成 http://127.0.0.1:8080/car 或 https 开头的地址再试。", "warn");
+else
+  tr("💡 摇杆推了车不动时: 打开「设置」看「已发 N 帧 / 失败 / 断」—— 帧数不涨=没发出去, 涨了=发了车不认。", "dim");
 if (localStorage.getItem("ds_key"))
   tr("(已存 DeepSeek key —— 现在**控车和聊天都能用**, 直接说就行)", "dim");
 else
