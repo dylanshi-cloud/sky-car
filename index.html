@@ -90,6 +90,12 @@
         几乎正好填满, 只剩左右两条细黑边。 */
   #preview{position:relative;flex:1 1 auto;min-height:110px;background:#000;
            border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  /* ⚠️⚠️ 「设置」一展开, 右边那列(摇杆 108 + 间距 16 + 圆盘 90 + 首尾空档的 gap ≈ 246)
+     就把取景器压到 min-height 那 110px, 圆盘被 overflow:hidden **从底下切掉半个**(实测)。
+     展开时把下限抬到刚好装得下整列 —— 让页面**改成往下滚**, 也别切掉圆盘。
+     ⚠️ `:has()` 要 Safari 15.4+ / Chrome 105+; 本页只跑 iOS Safari 和桌面 Chrome, 够用
+        (car.html 没有 face.html 那个 Chromium 62 的包袱)。 */
+  body:has(details[open]) #preview{min-height:250px}
   #preview video{position:absolute;left:0;top:0;width:70%;height:100%;
                  object-fit:contain;display:block;background:#000}
   #pvOff{position:absolute;left:0;top:0;width:70%;bottom:0;display:flex;align-items:center;
@@ -98,9 +104,20 @@
 
   /* ---- 取景器右边那一列: 摄像头摇杆(上) + 速度圆盘(下) ----
      ⚠️ 整列 absolute 贴右, 视频那边靠 left:0 —— 两边各占各的, 谁也不挤谁。
-     ⚠️ 竖直居中: 这一列比取景器矮, 顶上/底下留白比贴边好看。 */
-  #rcol{position:absolute;right:6px;top:0;bottom:0;width:60px;
-        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+     ⚠️ 宽度得**跟着圆盘走**(60→90): 圆盘比列还宽的话, 取景器那句 overflow:hidden
+        会从右边把它切掉一截。
+     ⚠️⚠️ **不再用 `justify-content:center` 竖着居中** —— 圆盘一放大, 居中会把整组
+        往两边撑: 圆盘往下、摇杆**同时往上**, 而用户只要圆盘往下。
+        改用**首尾两个弹性空档**, 上:下 = 2:1 按余量分配 ⇒ 整组压在下半区,
+        而且比例是活的, 矮视口自己会收, 不用写死 px。 */
+  #rcol{position:absolute;right:6px;top:0;bottom:0;width:90px;
+        display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+        gap:16px}
+  /* ⚠️ 两个空档就是普通 flex 子项, `flex:2` / `flex:1` 把自由度按 2:1 分掉。
+     空元素不写 width 的话在竖排里会被压成 0 宽, 无所谓 —— 它只负责占高度。 */
+  #rcol::before,#rcol::after{content:"";display:block;flex:0 1 0}
+  #rcol::before{flex:2 1 0}   /* 上方留白 = 总余量的 2/3 */
+  #rcol::after {flex:1 1 0}   /* 下方留白 = 总余量的 1/3 */
 
   /* ---- 摄像头摇杆: 纵向三档 (上=前 中=关 下=后), **纯图标无文字** ----
      一列三个格子 + 一个会滑动的"摇杆帽"(#rockThumb)。点哪格, 帽子滑到哪格。
@@ -238,14 +255,14 @@
      ⚠️ 不用 conic-gradient / repeating-conic —— Chrome 69+ 才有, 且一旦写进 background
         简写里, 老引擎会**丢掉整条声明**(同 min()/inset 那类坑)。这里全程只用径向渐变。
      ⚠️ touch-action:none 必须写 —— 否则手指一拖, 页面跟着一起滚, 盘就抓不住了。 */
-  #dial{flex:0 0 auto;position:relative;width:60px;height:60px;border-radius:50%;
+  #dial{flex:0 0 auto;position:relative;width:90px;height:90px;border-radius:50%;
         touch-action:none;
         background:radial-gradient(circle at 36% 26%,
                    #4d6f86 0%,#263b4e 32%,#111e2a 64%,#070c12 100%);
-        box-shadow:inset 0 2px 1px rgba(255,255,255,.26),
-                   inset 0 -5px 9px rgba(0,0,0,.78),
-                   0 0 0 3px #0d141c, 0 0 0 4px var(--line2),
-                   0 6px 12px rgba(0,0,0,.7);
+        box-shadow:inset 0 3px 2px rgba(255,255,255,.26),
+                   inset 0 -8px 14px rgba(0,0,0,.78),
+                   0 0 0 4px #0d141c, 0 0 0 5px var(--line2),
+                   0 9px 18px rgba(0,0,0,.7);
         transition:transform .05s linear}
   /* 按下去: 整体下沉 + 内高光收掉 + 外投影变短 —— 三样一起变才"陷得进去"(同急停钮那套) */
   #dial.drag{transform:translateY(1px) scale(.97);
@@ -258,13 +275,22 @@
      竖条上时事件目标是 <i>, setPointerCapture 虽然照样能用, 但语义上别扭。 */
   #dialKnob{position:absolute;left:0;top:0;width:100%;height:100%;
             pointer-events:none;transition:transform .1s ease-out}
-  #dialKnob i{position:absolute;left:50%;top:6px;width:4px;height:14px;
-              margin-left:-2px;display:block;border-radius:2px;
+  #dialKnob i{position:absolute;left:50%;top:9px;width:6px;height:21px;
+              margin-left:-3px;display:block;border-radius:3px;
               background:linear-gradient(180deg,#eafcff,var(--acc) 55%,var(--acc2));
-              box-shadow:0 0 7px 1px rgba(79,201,240,.9)}
-  #dialVal{position:absolute;left:0;right:0;top:50%;margin-top:-8px;text-align:center;
-           font:600 12px/16px ui-monospace,Menlo,monospace;color:var(--acc);
-           pointer-events:none;text-shadow:0 0 8px rgba(79,201,240,.6)}
+              box-shadow:0 0 10px 2px rgba(79,201,240,.9)}
+  #dialVal{position:absolute;left:0;right:0;top:50%;margin-top:-10px;text-align:center;
+           font:600 16px/20px ui-monospace,Menlo,monospace;color:var(--acc);
+           pointer-events:none;text-shadow:0 0 10px rgba(79,201,240,.6)}
+  /* ⚠️ 极矮视口的兜底: 取景器只剩 ~200px 时, 摇杆 108 + 圆盘 90 光这两样就 198,
+     再加快档间距必被 `#preview` 的 overflow:hidden 从底下切掉。
+     ⚠️ 阈值取 640 是有意的 —— **390×664(Safari 带地址栏的 iPhone 12)必须落在外面**,
+        那种视口取景器还有 302px, 90 的圆盘装得下, 不该被缩小。 */
+  @media (max-height:640px){
+    #dial{width:64px;height:64px}
+    #dialKnob i{top:7px;width:5px;height:15px;margin-left:-2.5px;border-radius:2px}
+    #dialVal{margin-top:-8px;font:600 12px/16px ui-monospace,Menlo,monospace}
+  }
 
   /* ---- 中段: 对话记录(整行) + **嵌在对话框里面**的竖排两个立体图标钮 ---- */
   #midRow{flex:0 0 auto;position:relative;height:158px}
@@ -388,7 +414,9 @@
     <button id="bSave">保存 key</button>
     <button id="bTest">帧自检</button>
   </div>
-  <div id="diag" class="dim" style="white-space:pre-wrap;font-size:12px"></div>
+  <!-- 后台/自检信息都堆在这里。⚠️ 加 max-height + overflow, 开一整天也不会把设置面板撑爆 -->
+  <div id="diag" class="dim"
+       style="white-space:pre-wrap;font-size:12px;max-height:150px;overflow-y:auto"></div>
 </details>
 
 <script>
@@ -446,6 +474,18 @@ function tr(t, cls) {
   trEl.appendChild(d);
   while (trEl.childNodes.length > 300) trEl.removeChild(trEl.firstChild);   // 页面可能开一整天, 别让 DOM 无限涨
   trEl.scrollTop = trEl.scrollHeight;
+}
+/* ---- 后台信息: **不进中间的对话框**, 全走「设置」里那块等宽自检区 ----
+   ⚠️ 用户 2026-09-21 要求: 中间的框**只留两类** —— 语音互动(说了啥/回了啥/车动了没)
+      和按钮互动(连车/开麦/开关摄像头/拧速度/急停)。协议帧、耗时、定时器到期、
+      异常堆栈这些**编程信息**一律挪进设置里。
+   ⇒ 判据: 用户**能听见 或 能按到**的 → tr(); 其余 → dbg()。 */
+let dbgBuf = [];
+function dbgRender() { $("diag").textContent = dbgBuf.join("\n"); }
+function dbg(t) {
+  dbgBuf.push(String(t));
+  while (dbgBuf.length > 300) dbgBuf.shift();
+  dbgRender();
 }
 let hud = {};
 function draw() {
@@ -550,7 +590,8 @@ async function connectCar() {
     hud.ble = true; $("bCar").classList.add("on"); draw();
     tr("✓ 已连车 " + (dev.name || dev.id) + " , 已发进遥控模式", "s");
   } catch (e) {
-    tr("✗ 连车失败: " + e.name + " — " + e.message, "e");
+    dbg("连车失败: " + e.name + " — " + e.message);
+    tr("✗ 连车失败（" + e.name + "）", "e");
     if (e.name === "NotFoundError")
       tr("  车开机了吗? PC 的 carbody.py 是不是还占着车?", "dim");
   }
@@ -560,7 +601,7 @@ async function connectCar() {
 let simV = null, simW = null;
 function writeDrive(v, w) {
   if (hud.sim) {
-    if (v !== simV || w !== simW) { simV = v; simW = w; tr(`[模拟] ${hex(driveCmd(v, w))}`, "dim"); }
+    if (v !== simV || w !== simW) { simV = v; simW = w; dbg(`[模拟] ${hex(driveCmd(v, w))}`); }
     return;
   }
   if (!rxChar || writing) return;      // 上一帧没写完就丢了重来, 保活宁可丢帧也不排队
@@ -577,7 +618,7 @@ function keepTick() {
   const now = performance.now();
   let v = 0, w = 0;
   if (now < cmdEnd) { v = cmdV; w = cmdW; }
-  else if (cmdEnd) { cmdV = cmdW = 0; cmdEnd = 0; tr("TTL 到 → 自动停", "s"); }
+  else if (cmdEnd) { cmdV = cmdW = 0; cmdEnd = 0; dbg("TTL 到 → 自动停"); }   // 定时器到期 = 后台信息
   /* ⚠️ 这里是全页唯一持续发帧的地方, 所以**闸②的钳位放在这儿最靠得住**:
      速度圆盘可以在车正走着的时候被拧小 —— 光在 applyCmd 里钳一次不够,
      那样已经把速度发出去了, 得等这条命令走完才降下来。每一帧都钳一次才是真的"立刻"。 */
@@ -599,6 +640,9 @@ const sec = (x, dflt, cap) => {
   const n = Number(x);
   return Math.max(0.1, Math.min(n > 0 ? n : dflt, cap));   // 非数/非正 → 用默认; 一律钳到上限
 };
+
+/* 动作 → 中文。⚠️ 只给**人看**的这一层用; 帧里的 v/w 是后台信息, 不进对话框。 */
+const CN = { forward: "前进", back: "后退", left: "左转", right: "右转", stop: "停" };
 
 /* 把"动作"落成命令。doWhat: forward|back|left|right|stop */
 function applyCmd(doWhat, secs) {
@@ -685,10 +729,11 @@ async function startCam(want) {
     /* ⚠️ **不要 await play()**: 它的 Promise 要等**第一帧到达**才 settle,
        流没吐帧时它会一直挂着 ⇒ UI 和日志全卡住(实测就是这么被坑的)。
        track 活着 = 摄像头真的开了, 播不播得出来是另一回事, 分开处理。 */
-    pv.play().catch((e) => tr("⚠️ 预览播放失败: " + e.name + "（摄像头其实已开）", "e"));
+    pv.play().catch((e) => dbg("⚠️ 预览播放失败: " + e.name + "（track 已开, 只是画面没吐帧）"));
   } catch (e) {
     camStream = null;
-    tr("✗ 摄像头失败: " + e.name + " — " + e.message, "e");
+    dbg("✗ 摄像头 " + camName() + " 失败: " + e.name + " — " + e.message);
+    tr("✗ 开" + camName() + "摄像头失败", "e");
     camUI(false, e.name === "NotAllowedError"
         ? "没给摄像头权限 —— 点这里重试"
         : "点这里重试（" + e.name + "）");
@@ -769,7 +814,11 @@ async function askLLM(text) {
         messages: [{ role: "system", content: SYS }, { role: "user", content: text }],
       }),
     });
-    if (!r.ok) { tr("大脑 HTTP " + r.status + " " + (await r.text()).slice(0, 120), "e"); return; }
+    if (!r.ok) {
+      dbg("大脑 HTTP " + r.status + " " + (await r.text()).slice(0, 120));
+      tr("✗ 大脑出错，这句没动", "e");
+      return;
+    }
     const rd = r.body.getReader(), dec = new TextDecoder();
     let acc = "", buf = "", acted = false;
     for (;;) {
@@ -791,9 +840,9 @@ async function askLLM(text) {
           for (const k of LLMW) {
             if (acc.includes(k)) {
               acted = true;
-              const ms = performance.now() - t0;
               const what = LLMAP[k];
-              tr(`大脑 ${ms.toFixed(0)}ms → ${k}`, "c");
+              dbg("大脑往返 " + (performance.now() - t0).toFixed(0) + "ms");
+              tr("大脑 → " + k, "c");
               doAction(what);
               break;
             }
@@ -803,7 +852,8 @@ async function askLLM(text) {
     }
     if (!acted) tr("大脑说「" + acc.trim() + "」→ 不动", "dim");
   } catch (e) {
-    tr("大脑失败: " + e.name + " — " + e.message, "e");
+    dbg("大脑失败: " + e.name + " — " + e.message);
+    tr("✗ 大脑连不上，这句没动", "e");
   }
 }
 
@@ -812,7 +862,9 @@ async function askLLM(text) {
    ======================================================================== */
 function doAction(what) {
   const line = applyCmd(what);
-  if (line) tr("→ " + line, "s");
+  /* ⚠️ 对话框里只写动作本身。applyCmd 返回的那串里带 v=/w=/秒数, 是后台信息, 进 dbg。 */
+  if (line) dbg("命令 " + line);
+  if (what) tr("→ " + (CN[what] || what), "s");
   say({ forward: "走", back: "后退", left: "左转", right: "右转", stop: "停了" }[what] || "");
 }
 function say(t) {
@@ -845,9 +897,13 @@ function startMic() {
     };
     /* ⚠️ iOS 上识别会因为静音自己结束 —— 只要还开着听, 就重起 */
     rec.onend = () => { if (listening) setTimeout(() => { if (listening) { try { rec.start(); } catch (e) {} } }, 250); };
+    /* ⚠️ "no-speech" 这类每小时能刷几十条, 全进 dbg; 只有真的没权限才在对话框里说一声 */
     rec.onerror = (e) => {
-      tr("识别错误: " + e.error, "e");
-      if (e.error === "not-allowed") { listening = false; syncMic(); }
+      dbg("识别错误: " + e.error);
+      if (e.error === "not-allowed") {
+        listening = false; syncMic();
+        tr("✗ 麦克风没权限 —— 设置 → Safari → 麦克风 打开", "e");
+      }
     };
   }
   listening = true;
@@ -871,7 +927,8 @@ function handleText(text) {
   tr("你: " + text, "u");
   if (isStop(text)) { tr("★ 急停口令命中 → 直接停", "s"); hardStop("(急停口令)"); return; }
   const local = localIntent(text);
-  if (local) { tr("本地 → " + local, "c"); doAction(local); return; }
+  /* ⚠️ 不再单独报"本地命中" —— 那是哪一层判的, 属后台信息; doAction 那行「→ 前进」已经说明结果。 */
+  if (local) { dbg("本地词表命中 → " + local); doAction(local); return; }
   askLLM(text);                // 都不中才走云端
 }
 
@@ -903,7 +960,9 @@ $("bTest").addEventListener("click", () => {
   out += "\n急停词自测(应为 停/不停→否/停车场→否):\n";
   for (const s of ["停一下", "往前走", "不要停", "停车场在哪", "别动"])
     out += `  ${s.padEnd(8, " ")} → ${isStop(s) ? "停" : "否"}\n`;
-  $("diag").textContent = out;
+  dbgBuf = out.split("\n");      // 自检是一次性的全量输出, 直接换掉整块缓冲
+  while (dbgBuf.length > 300) dbgBuf.shift();
+  dbgRender();
   tr("自检已出，见「设置」里", "dim");
 });
 
