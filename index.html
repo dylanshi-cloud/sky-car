@@ -587,9 +587,11 @@
   <summary>设置 / 自检</summary>
   <div id="hud">·</div>
   <label class="chk"><input type="checkbox" id="sim" checked> 模拟模式（不发蓝牙，只打印帧）</label>
-  <div>DeepSeek key（只存这台手机，不进源码/不进 git）
-    <br>也可以用 <b>网址<span class="dim">#k=sk-...</span></b> 打开一次, 自动读入并抹掉地址栏</div>
-  <input type="password" id="key" placeholder="sk-...">
+  <div>DeepSeek key（前面 32 位已内置，<b>只需补最后 3 位</b>，再点「保存 key」）
+    <br>⚠️ 内置的 32 位在公开源码里、剩下 3 位可穷举 ⇒ 这个 key 视同公开
+    <br>想要干净点: 用 <b>网址<span class="dim">#k=sk-...</span></b> 打开一次, 自动读入并抹掉地址栏</div>
+  <input type="password" id="key" placeholder="sk-..."
+         autocapitalize="off" autocorrect="off" spellcheck="false">
   <div class="row" style="margin-top:2px">
     <button id="bSave">保存 key</button>
     <button id="bTest">帧自检</button>
@@ -1321,12 +1323,28 @@ function handleText(text) {
 $("estop").addEventListener("click", () => hardStop("(急停按钮)"));
 $("bCar").addEventListener("click", connectCar);
 $("bMic").addEventListener("click", () => (listening ? stopMic() : startMic()));
+/* ---- 内置 key 前 32 位(用户 2026-09-21 要求): 手机上只需手打最后 3 位 ----
+   ⚠️⚠️ **这不是"密钥不进公开文件"**: 剩下那 3 位是小写十六进制,
+      穷举空间只有 **16³ = 4096**, 几十行脚本一会儿就试完
+      ⇒ 公开仓库里躺着这一行, **事实上等于把这个 key 公开了**。
+      真正干净的做法是本文件下方那条 `#k=` hash 通路(源码里一个字都没有)。
+   做法: 输入框**默认值 = 这 32 位**, 聚焦时光标自动落到末尾, 手打 3 位即可。 */
+const KEY_PREFIX = "sk-7b53c80f64b841d685b8c181336bd";
+
+$("key").value = KEY_PREFIX;                        // 默认值 = 前 32 位
+$("key").addEventListener("focus", () => {          // 光标送到末尾(iOS 会按落点插到中间)
+  const el = $("key");
+  setTimeout(() => { try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) {} }, 0);
+});
 $("bSave").addEventListener("click", () => {
-  const v = $("key").value.trim();
-  if (!v) { localStorage.removeItem("ds_key"); tr("已清空 key", "dim"); return; }
+  const raw = $("key").value.trim();
+  if (!raw) { localStorage.removeItem("ds_key"); tr("已清空 key", "dim"); return; }
+  /* 只填了尾巴(比如 "576")→ 自动补上内置前缀; 填够长度 → 当整串 key 用(手动换 key 走这条) */
+  const v = raw.length < KEY_PREFIX.length ? KEY_PREFIX + raw : raw;
+  if (v === KEY_PREFIX) { tr("还差最后 3 位没填", "warn"); return; }
   localStorage.setItem("ds_key", v);
-  $("key").value = "";
-  tr("✓ key 已存本机 (localStorage), 不进源码也不出这台手机", "s");
+  $("key").value = KEY_PREFIX;                      // 复位, 免得再存一次把尾巴叠两遍
+  tr("✓ key 已存本机 (localStorage)", "s");
 });
 $("sim").addEventListener("change", (e) => { hud.sim = e.target.checked; draw(); tr("模拟模式 " + (hud.sim ? "开" : "关"), "dim"); });
 $("bTest").addEventListener("click", () => {
@@ -1365,7 +1383,8 @@ hud.ble = false; hud.mic = false; hud.v = hud.w = 0; hud.ttl = 0;
       访问日志、CDN 日志里都不会出现这个 key; `?k=` 会明文进日志。
    ⚠️ 读完**立刻 replaceState 把 hash 抹掉**: 地址栏老挂着一串密钥, 截图/分享/历史
       都会把它带出去。抹掉之后 key 只活在 localStorage 里。
-   ⚠️ 公开源码里**一个字都没有** —— 这条通路本身就是"密钥不进公开文件"的解法。
+   ⚠️ 这条通路**源码里一个字都没有** —— 上面 `KEY_PREFIX` 那条内置了 32/35 个字
+      (剩下 3 位十六进制 4096 种, 可穷举) ⇒ **真要干净就用这条 hash 通路, 别用内置那条**。
    恢复办法: 再点一次那条带 `#k=` 的链接即可。 */
 (function restoreKeyFromHash() {
   const m = /[#&]k=([^&]+)/.exec(location.hash || "");
@@ -1513,7 +1532,7 @@ tr("⚠️ 默认是**模拟模式**, 只打印帧不发蓝牙。确认帧对了
 if (localStorage.getItem("ds_key"))
   tr("(已存 DeepSeek key —— 现在**控车和聊天都能用**, 直接说就行)", "dim");
 else
-  tr("(没设 key: 只能听懂「前进/后退/左转/右转/停」这几句, 不能聊天)", "dim");
+  tr("(没设 key: 打开「设置」→ 输入框已填好前 32 位, 补最后 3 位 → 点「保存 key」)", "dim");
 
 /* 开页就试着起摄像头(架在车上时省一次点击)。
    ⚠️ iOS 对 getUserMedia 有时认"用户手势" —— 起不来也不报错死, 遮罩会变成可点的重试提示。 */
