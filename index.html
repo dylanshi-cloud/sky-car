@@ -32,9 +32,10 @@
   --------------------------------------------------------------------------
   ★★ 三层安全闸 (与 talk.py / carbody.py 完全对齐, 一层都不能少) ★★
      ① **本地急停**: 转写里出现急停词 → 立刻停车, **不问大脑**。
-        外加脸上那颗**常驻的红色动物鼻子** —— 八边形就是停车标志的形状, 一个字没有。
-        这是最后一道, 比语音可靠。
-     ② **钳位**: 速度一律钳在 max_v/max_w = ±12%, 时长钳在 max_step/hold_sec。
+        外加脸上那颗**常驻的红色立体大按钮** —— 一颗凸起来的红色圆钮, 一个字没有,
+        形状就是"按下去"的意思。这是最后一道, 比语音可靠。
+     ② **钳位**: 速度一律钳在 max_v/max_w = ±地面速度上限(圆盘可调, 4~12%),
+        时长钳在 max_step/hold_sec。
         **不信模型给的数**, 只信这里写死的常量。"前进/后退/左转/右转"速度固定取上限。
      ③ **TTL**: 每条运动都有到期时刻, 到点自动归零。再加 12Hz 保活重发
         (车的遥控协议 **~1s 收不到帧就自己停**)。
@@ -45,11 +46,31 @@
   ==========================================================================
 -->
 <style>
-  :root{color-scheme:dark}
+  /* ==========================================================================
+     配色: 冷灰蓝 + 一点青光。**只用这一组变量**, 不要再散着写十六进制 ——
+     上一版就是每个块各写各的蓝(#16303f/#24506e/#2b5f80/#8fd0ff…),
+     整体看着"哪儿都对但不像一套"。层级: 底 → 面板 → 面板亮面, 描边统一 line。
+     ========================================================================== */
+  :root{
+    color-scheme:dark;
+    --bg:#070a0f;          /* 页面底 */
+    --panel:#0d141c;       /* 面板底(对话/状态/设置) */
+    --panel2:#132030;      /* 面板亮面(按钮/取景器框) */
+    --line:#1b2c3b;        /* 普通描边 */
+    --line2:#2a4759;       /* 亮描边(可点元素) */
+    --tx:#c6d8e6;          /* 正文 */
+    --dim:#63808f;         /* 次要 */
+    --acc:#4fc9f0;         /* 主强调: 青 */
+    --acc2:#1d7fa6;        /* 主强调的暗档(按钮渐变下半) */
+    --ok:#42dd8b;          /* 已连/在听 */
+    --bad:#ff5a52;         /* 错误 */
+    --warn:#ffb020;        /* 提醒 */
+    --stop:#ff4436;        /* 急停(全页唯一的纯红) */
+  }
   /* ⚠️ 显式 border-box。默认的 content-box 会让 height:104px 实际渲染成 122px
      (padding+border 加上去) —— face.html 的嘴巴"老挡住眼睛"就是这个坑, 别再来一次。 */
   *,*::before,*::after{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:#05070a;color:#cfe3f2;
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);
             font:15px/1.6 -apple-system,"PingFang SC",system-ui,sans-serif;
             -webkit-user-select:none;user-select:none;overscroll-behavior:none}
   /* 竖排 flex: 取景器吃掉所有余量, 其余按内容高度排。
@@ -57,125 +78,180 @@
   body{display:flex;flex-direction:column;gap:8px;box-sizing:border-box;padding:8px;
        padding-top:calc(8px + env(safe-area-inset-top,0px));
        padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
-  h1{font-size:12px;margin:0;color:#8fd0ff;font-weight:600;flex:0 0 auto}
+  h1{font-size:11.5px;margin:0;color:var(--acc);font-weight:600;letter-spacing:.5px;
+     flex:0 0 auto;opacity:.85}
 
   /* ---- 取景器: 架在车上当第一视角 ---- */
-  #preview{position:relative;flex:1 1 auto;min-height:120px;background:#000;
-           border:1px solid #16303f;border-radius:11px;overflow:hidden}
+  #preview{position:relative;flex:1 1 auto;min-height:110px;background:#000;
+           border:1px solid var(--line);border-radius:12px;overflow:hidden}
   /* ⚠️ 用 contain 不是 cover: cover 会把 16:9 的画面裁到预览框的比例,
      左右两边各切掉一截 —— 开车第一视角**看到完整视野**比"没有黑边"重要。 */
   #preview video{width:100%;height:100%;object-fit:contain;display:block;background:#000}
   #pvOff{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;
-         justify-content:center;text-align:center;padding:14px;background:#070d13;
-         color:#8fd0ff;font-size:14px}
+         justify-content:center;text-align:center;padding:14px;background:var(--panel);
+         color:var(--acc);font-size:13.5px}
+
   /* ---- 摄像头摇杆: 纵向三档 (上=前 中=关 下=后), **纯图标无文字** ----
      一列三个格子 + 一个会滑动的"摇杆帽"(#rockThumb)。点哪格, 帽子滑到哪格。
      ⚠️ 帽子是 z-index:1, 三个 .slot 是 z-index:2 且 flex:1 铺满整条 ——
-        所以帽子**永远点不到**, 点哪都落到某个 slot 上, 不用额外处理。 */
+        所以帽子**永远点不到**, 点哪都落到某个 slot 上, 不用额外处理。
+     ⚠️ 尺寸 = 上一版的一半(46x132 → 26x72)。是小, 但它是"偶尔调一次"的东西, 不是急停。 */
   #camRock{position:absolute;right:6px;top:50%;transform:translateY(-50%);
-           width:46px;height:132px;padding:3px;border-radius:23px;
-           background:rgba(4,9,14,.66);border:1px solid #24506e;
+           width:26px;height:72px;padding:2px;border-radius:13px;
+           background:rgba(7,10,15,.72);border:1px solid var(--line2);
            display:flex;flex-direction:column}
   #camRock .slot{flex:1 1 0;position:relative;z-index:2;border:0;padding:0;
-                 background:transparent;border-radius:20px;color:#4d6577;
+                 background:transparent;border-radius:11px;color:var(--dim);
                  display:flex;align-items:center;justify-content:center}
-  #camRock .slot svg{width:23px;height:23px;display:block}
-  #camRock .slot.sel{color:#eaf4ff}
-  #rockThumb{position:absolute;left:3px;top:4px;width:40px;height:40px;border-radius:20px;
+  #camRock .slot svg{width:13px;height:13px;display:block}
+  #camRock .slot.sel{color:var(--acc)}
+  #rockThumb{position:absolute;left:2px;top:3px;width:20px;height:20px;border-radius:10px;
              z-index:1;transition:transform .18s ease;
-             background:linear-gradient(180deg,#3a86ad,#0e2433);
-             box-shadow:inset 0 1px 0 rgba(255,255,255,.34), 0 3px 7px rgba(0,0,0,.55)}
+             background:linear-gradient(180deg,var(--acc),var(--acc2));
+             box-shadow:inset 0 1px 0 rgba(255,255,255,.4), 0 2px 5px rgba(0,0,0,.6)}
 
   .row{display:flex;align-items:center;gap:8px;flex:0 0 auto}
   .row button{flex:1}
-  button{padding:13px 10px;border-radius:11px;border:1px solid #24506e;
-         background:#0d1c28;color:#cfe3f2;font-size:15px;font-weight:600}
-  button:active{background:#16303f}
+  button{padding:13px 10px;border-radius:11px;border:1px solid var(--line2);
+         background:var(--panel2);color:var(--tx);font-size:15px;font-weight:600}
+  button:active{background:#1b2d3f}
   button:disabled{opacity:.4}
-  button.on{background:#123a2a;border-color:#2f7d55;color:#7ff0b0}
+  button.on{background:#0f3b2a;border-color:#2f7d55;color:#8dffc0}
 
-  /* ---- 脸: 一双会翻白眼的卡通眼 + 中间偏下的红鼻子(=急停) ---- */
-  #face{flex:0 0 auto;position:relative;height:138px;
-        display:flex;justify-content:center;align-items:flex-start;gap:40px}
-  .eye{flex:0 0 auto;width:86px;height:92px;border-radius:50%;background:#eaf4ff;
-       position:relative;animation:blink 11s infinite}
-  /* 瞳 = .pupil 元素(不是伪元素) —— 因为它自己要走一套"眼神"动画, 不能跟眼皮动画挤在一个元素上。
-     ⚠️ 不能做大做低(第一版 40px @56% 出来的是一张"瞪眼发呆"的脸), 大了就是呆不是调皮。 */
-  .pupil{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;
-         border-radius:50%;background:#0b1620;animation:attitude 11s infinite}
-  .pupil::after{content:"";position:absolute;left:58%;top:20%;width:11px;height:11px;
-                border-radius:50%;background:#fff;opacity:.92}
-  #eye2 .pupil,#eye2{animation-delay:-.14s}   /* 差一丁点才自然; 差太多就成两只不一样的生物了 */
+  /* ---- 脸: 变形金刚那路数的眼睛(角形金属框 + 青辉 + 白色亮核) + 中间的急停钮 ---- */
+  /* ⚠️ 高度必须 ≥ 急停钮的 top+height(56+84=140), 否则那个 absolute 的圆钮会溢出到
+     #midRow 上去; 上面那 56px 正好装眼睛(眼高 52)。 */
+  #face{flex:0 0 auto;position:relative;height:140px;
+        display:flex;justify-content:center;align-items:flex-start;gap:38px}
+  /* 角形金属框。两只眼的顶边都**朝鼻子那侧压下来** —— 这一斜就是"坏笑/不屑"的全部来源。
+     ⚠️ clip-path 会把 box-shadow 一起裁掉, 所以外投影只能用 filter:drop-shadow(父级那个)。
+     ⚠️ 用 polygon 就**不能**再写 border-radius, 两者互相覆盖。 */
+  .eye{flex:0 0 auto;width:88px;height:52px;position:relative;
+       background:linear-gradient(180deg,#8ea4b6 0%,#3c5470 20%,#152130 58%,#070c12 100%);
+       clip-path:polygon(4% 100%,0 34%,30% 0,96% 14%,100% 100%);
+       filter:drop-shadow(0 3px 5px rgba(0,0,0,.75));
+       animation:blink 11s infinite}
+  #eye2{clip-path:polygon(96% 100%,100% 34%,70% 0,4% 14%,0 100%)}   /* 镜像 */
+  /* 里头的透镜(这才是"眼睛本体")。⚠️ 角形**梭形** —— 两端都得收成尖角。
+     上一版上下两条边都是平的(梯形), 渲染出来就是两块蓝板子, 一点不像眼睛。
+     内端(靠鼻子那侧)压得更低, 才跟上面那道斜眉平行 = 一副"没好气"的斜眼。 */
+  .glow{position:absolute;left:9%;right:9%;top:16%;bottom:14%;
+        clip-path:polygon(2% 34%,34% 12%,68% 20%,98% 56%,66% 88%,30% 84%);
+        /* 径向渐变里那两段突变(58%→70%)就是"虹膜环" —— 没有这圈环, 整块就糊成一团光 */
+        background:radial-gradient(circle at 52% 45%,
+                   #ffffff 0%,#d8f8ff 10%,#5fd9ff 24%,#1a9fd0 42%,
+                   #0a5570 58%,#062b3a 70%,#0d4460 76%,#061b26 100%);
+        animation:eyeglow 2.6s ease-in-out infinite}
+  #eye2 .glow{clip-path:polygon(98% 34%,66% 12%,32% 20%,2% 56%,34% 88%,70% 84%)}
+  /* 亮核。**竖条**不是圆点 —— 变形金刚那个"光核"是竖的一条, 圆点就不像了。
+     它是独立元素, 因为要自己走一套"眼神"动画, 不能跟眼皮动画挤在同一个元素上。 */
+  .pupil{position:absolute;left:50%;top:50%;width:11px;height:25px;margin:-12.5px 0 0 -5.5px;
+         border-radius:5px;animation:attitude 11s infinite;
+         background:linear-gradient(180deg,#ffffff,#eafcff 38%,#8fe6ff 72%,#2ea8d8);
+         box-shadow:0 0 9px 2px rgba(170,245,255,.95), 0 0 20px 6px rgba(60,190,240,.45)}
+  /* ⚠️ 错开只能一丁点: blink 那些关键帧是**跳变**的(46%→50% 就压完),
+     错 1.3%(实测 -.14s) 会让两只眼在眨眼瞬间高度差一倍 —— 像坏了, 不像调皮。 */
+  #eye2 .pupil,#eye2{animation-delay:-.05s}
 
-  /* 眼皮: 眨眼 + 半闭(不情愿)。⚠️ scaleY 会把瞳一起压扁 —— 这正好就是翻白眼要的效果 */
+  /* 眼皮: 眨眼 + 半闭(不情愿)。⚠️ scaleY 会把亮核一起压扁 —— 这正好就是翻白眼要的效果:
+     框压成一条细缝 + 里面青光还在 = 变形金刚式的"眯眼不屑"。 */
   @keyframes blink{
     0%,7%,100%{transform:scaleY(1)}
     9%{transform:scaleY(.06)}  12%{transform:scaleY(1)}          /* 眨一下 */
     46%{transform:scaleY(1)}
-    50%{transform:scaleY(.26)} 58%{transform:scaleY(1)}          /* 半闭着往上瞟 = 不情愿 */
+    50%{transform:scaleY(.22)} 58%{transform:scaleY(1)}          /* 半闭着往上瞟 = 不情愿 */
     86%{transform:scaleY(1)}
     88%{transform:scaleY(.06)} 91%{transform:scaleY(1)}          /* 再眨一下 */
   }
+  @keyframes eyeglow{0%,100%{opacity:.72} 50%{opacity:1}}
   /* 眼神: 先斜眼(调皮), 再往上翻(翻白眼), 回正 */
   @keyframes attitude{
     0%,6%,100%{transform:translate(0,0)}
-    14%{transform:translate(-15px,2px)}   24%{transform:translate(-15px,2px)}   /* 斜眼一瞥 */
+    14%{transform:translate(-14px,1px)}   24%{transform:translate(-14px,1px)}   /* 斜眼一瞥 */
     32%{transform:translate(0,0)}
-    42%{transform:translate(9px,-4px)}    46%{transform:translate(9px,-16px)}   /* 往上翻 */
-    50%{transform:translate(9px,-16px)}   58%{transform:translate(0,3px)}
+    42%{transform:translate(8px,-3px)}    46%{transform:translate(8px,-12px)}   /* 往上翻 */
+    50%{transform:translate(8px,-12px)}   58%{transform:translate(0,2px)}
     68%{transform:translate(0,0)}
-    76%{transform:translate(13px,0)}      82%{transform:translate(13px,0)}      /* 又瞟一眼 */
+    76%{transform:translate(12px,0)}      82%{transform:translate(12px,0)}      /* 又瞟一眼 */
     90%{transform:translate(0,0)}
   }
 
-  /* 急停 = 鼻子。动物鼻子的形状(八边形=停止标记的轮廓), 两颗鼻孔, **一个字都没有**。
-     ⚠️ 绝对定位 + 比眼睛低: top 68 落在眼睛(高 100)的下半段, 像真脸那样"鼻子从两眼之间往下长"。
+  /* 急停 —— 就是个**大红按钮**, 不是鼻子了。做成急停蘑菇头的样子:
+     红色球冠(径向渐变偏左上) + 一圈深色护圈(base ring)。**没有文字**。
+     ⚠️ 护圈是用 box-shadow 的 0 0 0 Npx 描出来的(不是 border), 因为它要跟着按钮一起圆。
      ⚠️ 它**常驻在屏幕上**, 不许藏进 <details> —— 出事时手要去摸的就这一个东西。 */
-  #nose{position:absolute;left:50%;top:62px;margin-left:-38px;width:76px;height:70px;
-        padding:0;border:0;background:transparent;
-        filter:drop-shadow(0 5px 7px rgba(0,0,0,.6))}
-  #nose svg{width:100%;height:100%;display:block}
-  #nose:active{transform:translateY(2px);filter:drop-shadow(0 2px 3px rgba(0,0,0,.6))}
+  #estop{position:absolute;left:50%;top:56px;margin-left:-42px;width:84px;height:84px;
+         padding:0;border:0;border-radius:50%;
+         background:radial-gradient(circle at 37% 27%,#ff9d8e 0%,#ff4436 40%,#c01508 74%,#7a0a03 100%);
+         box-shadow:inset 0 3px 2px rgba(255,255,255,.42),
+                    inset 0 -9px 16px rgba(70,0,0,.62),
+                    0 0 0 5px #101a24, 0 0 0 6px var(--line2),
+                    0 8px 16px rgba(0,0,0,.65);
+         transition:transform .05s linear}
+  #estop:active{transform:translateY(3px) scale(.985);
+         box-shadow:inset 0 2px 2px rgba(255,255,255,.22),
+                    inset 0 8px 16px rgba(60,0,0,.7),
+                    0 0 0 5px #101a24, 0 0 0 6px var(--line2),
+                    0 3px 7px rgba(0,0,0,.6)}
 
-  /* 车辆状态 —— 放最下面 */
-  #hud{flex:0 0 auto;border:1px solid #16303f;border-radius:11px;padding:8px 12px;
-       background:#070d13;font:12px/1.6 ui-monospace,Menlo,monospace;white-space:pre-wrap}
-  .ok{color:#5be08a}.bad{color:#ff6b6b}.warn{color:#ffc440}.dim{color:#5d7688}
+  /* 最下面一行: 速度圆盘(左) + 车辆状态(右) */
+  #bottom{flex:0 0 auto;display:flex;gap:9px;align-items:stretch}
+  #hud{flex:1 1 auto;border:1px solid var(--line);border-radius:11px;padding:7px 10px;
+       background:var(--panel);font:10.5px/1.55 ui-monospace,Menlo,monospace;
+       white-space:pre-wrap;color:var(--tx);
+       display:flex;flex-direction:column;justify-content:center}
+  .ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.dim{color:var(--dim)}
+
+  /* 速度上限圆盘。270° 行程(正下方留 90° 缺口, 这样"到头了"一眼看得出), 拖动/点按都行。
+     ⚠️ 弧线用 **SVG 的 stroke-dasharray** 画, 不用 conic-gradient —— conic 是 Chrome 69+,
+        万一在 Chromium 62 上碰到, 整个 background 声明会被丢掉(同 min()/inset 那类坑)。
+     ⚠️ touch-action:none 必须写 —— 否则手指一拖, 页面跟着一起滚, 盘就抓不住了。 */
+  #dial{flex:0 0 auto;position:relative;width:66px;height:66px;touch-action:none}
+  #dial svg{width:100%;height:100%;display:block}
+  #dial .track{fill:none;stroke:#16232e;stroke-width:6}
+  #dial .arc{fill:none;stroke:var(--acc);stroke-width:6;stroke-linecap:round;
+             filter:drop-shadow(0 0 4px rgba(79,201,240,.75))}
+  #dialVal{position:absolute;left:0;right:0;top:50%;margin-top:-7px;text-align:center;
+           font:600 12px/14px ui-monospace,Menlo,monospace;color:var(--acc);
+           pointer-events:none}
 
   /* ---- 中段: 对话记录(左, 吃掉全部宽度) + 竖排两个立体图标钮(右) ---- */
   #midRow{flex:0 0 auto;display:flex;gap:8px;height:158px}
   /* ⚠️ 高度写死、不随内容长 —— 否则一说起话来它就把上面的取景器越挤越小(实测 342→280px) */
   #tr{flex:1 1 auto;height:100%;white-space:pre-wrap;word-break:break-word;
-      border:1px solid #16303f;border-radius:11px;padding:8px 12px;background:#070d13;
+      border:1px solid var(--line);border-radius:12px;padding:8px 12px;background:var(--panel);
       overflow-y:auto;font-size:13px}
-  #tr .u{color:#8fd0ff} #tr .c{color:#cfe3f2} #tr .s{color:#5be08a} #tr .e{color:#ff6b6b}
+  #tr .u{color:var(--acc)} #tr .c{color:var(--tx)} #tr .s{color:var(--ok)} #tr .e{color:var(--bad)}
 
-  #acts{flex:0 0 auto;width:62px;display:flex;flex-direction:column;gap:8px}
+  /* ⚠️ 尺寸 = 上一版的一半(62 宽 / 75 高 → 32 宽 / 46 高), 居中排不撑满整列 */
+  #acts{flex:0 0 auto;width:32px;display:flex;flex-direction:column;
+        justify-content:center;gap:7px}
   /* 立体: 上缘一道内高光 + 下缘一道内阴影 + 外投影, 按下去就"陷进去"。
      ⚠️ 别只写 box-shadow —— inset 的高光/暗边才是"凸起来"的关键, 缺一个就是一块平色。 */
-  #acts button{flex:1 1 0;padding:0;border-radius:15px;border:1px solid #2b5f80;
-               color:#7fb6d8;display:flex;align-items:center;justify-content:center;
-               background:linear-gradient(180deg,#204f6b,#0a1620 66%);
-               box-shadow:inset 0 1px 0 rgba(255,255,255,.30),
-                          inset 0 -3px 6px rgba(0,0,0,.55),
-                          0 4px 9px rgba(0,0,0,.5)}
-  #acts button svg{width:28px;height:28px;display:block}
+  #acts button{flex:0 0 auto;width:32px;height:46px;padding:0;border-radius:11px;
+               border:1px solid var(--line2);color:#7fb6d8;
+               display:flex;align-items:center;justify-content:center;
+               background:linear-gradient(180deg,var(--panel2),#08111a 68%);
+               box-shadow:inset 0 1px 0 rgba(255,255,255,.28),
+                          inset 0 -3px 6px rgba(0,0,0,.6),
+                          0 3px 7px rgba(0,0,0,.55)}
+  #acts button svg{width:15px;height:15px;display:block}
   #acts button:active{transform:translateY(2px);
-               box-shadow:inset 0 1px 0 rgba(255,255,255,.14),
-                          inset 0 3px 9px rgba(0,0,0,.65), 0 1px 3px rgba(0,0,0,.5)}
+               box-shadow:inset 0 1px 0 rgba(255,255,255,.12),
+                          inset 0 3px 8px rgba(0,0,0,.7), 0 1px 2px rgba(0,0,0,.5)}
   #acts button.on{color:#8dffc0;border-color:#2f7d55;
-               background:linear-gradient(180deg,#1f6b45,#06170f 66%);
-               box-shadow:inset 0 1px 0 rgba(255,255,255,.34),
-                          inset 0 -3px 6px rgba(0,0,0,.5),
-                          0 0 15px rgba(70,230,150,.40), 0 4px 9px rgba(0,0,0,.5)}
+               background:linear-gradient(180deg,#1c6242,#05130d 68%);
+               box-shadow:inset 0 1px 0 rgba(255,255,255,.32),
+                          inset 0 -3px 6px rgba(0,0,0,.55),
+                          0 0 12px rgba(66,221,139,.42), 0 3px 7px rgba(0,0,0,.55)}
 
-  details{flex:0 0 auto;border:1px solid #16303f;border-radius:11px;padding:10px 12px;
-          background:#070d13;font-size:13px}
-  summary{cursor:pointer;color:#8fd0ff;font-weight:600}
-  input[type=password],input[type=text]{width:100%;box-sizing:border-box;padding:10px;
-        border-radius:9px;border:1px solid #24506e;background:#0b1620;color:#cfe3f2;
+  details{flex:0 0 auto;border:1px solid var(--line);border-radius:11px;padding:9px 12px;
+          background:var(--panel);font-size:12.5px;color:var(--dim)}
+  summary{cursor:pointer;color:var(--dim);font-weight:600}
+  input[type=password],input[type=text]{width:100%;padding:10px;
+        border-radius:9px;border:1px solid var(--line2);background:#0b141d;color:var(--tx);
         font:13px ui-monospace,Menlo,monospace;margin:8px 0}
-  label.chk{display:flex;align-items:center;gap:8px;color:#8fd0ff;margin:6px 0}
+  label.chk{display:flex;align-items:center;gap:8px;color:var(--dim);margin:6px 0}
 </style>
 </head>
 <body>
@@ -208,31 +284,13 @@
   </div>
 </div>
 
-<!-- 脸: 一双会翻白眼的卡通眼 + 中间偏下那颗红鼻子(急停)。
+<!-- 脸: 变形金刚那路数的角形眼(金属框 + 青辉 + 白色亮核) + 中间的急停大红按钮。
      ⚠️ 急停按钮**必须常驻在屏幕上**, 不许藏进 <details> 或需要滚动才看得到 —— 它比语音可靠。 -->
 <div id="face">
-  <div class="eye"><i class="pupil"></i></div>
-  <div class="eye" id="eye2"><i class="pupil"></i></div>
-  <!-- 动物鼻子 + 八边形(停止标记的轮廓)。**没有一个字**, 靠形状认。 -->
-  <button id="nose" aria-label="急停">
-    <svg viewBox="0 0 100 92">
-      <defs>
-        <radialGradient id="ng" cx="34%" cy="24%" r="82%">
-          <stop offset="0" stop-color="#ffa294"/><stop offset=".52" stop-color="#e3301d"/>
-          <stop offset="1" stop-color="#7e0b05"/>
-        </radialGradient>
-      </defs>
-      <!-- 八边形 = 停车标志的形状, 平顶朝上 -->
-      <polygon points="30,4 70,4 96,30 96,62 70,88 30,88 4,62 4,30"
-               fill="url(#ng)" stroke="#ffe2dc" stroke-width="3.5"/>
-      <polygon points="33,10 67,10 90,33 90,59 67,82 33,82 10,59 10,33"
-               fill="none" stroke="rgba(0,0,0,.28)" stroke-width="2.5"/>
-      <!-- 两颗鼻孔 ⇒ 一眼看出是"鼻子"不是"按钮" -->
-      <ellipse cx="37" cy="55" rx="7.6" ry="10.6" fill="#4d0703" transform="rotate(-9 37 55)"/>
-      <ellipse cx="63" cy="55" rx="7.6" ry="10.6" fill="#4d0703" transform="rotate(9 63 55)"/>
-      <ellipse cx="35.5" cy="31" rx="11" ry="7" fill="#fff" opacity=".26" transform="rotate(-24 35.5 31)"/>
-    </svg>
-  </button>
+  <div class="eye"><i class="glow"></i><i class="pupil"></i></div>
+  <div class="eye" id="eye2"><i class="glow"></i><i class="pupil"></i></div>
+  <!-- 就是一个 3D 急停蘑菇钮。没有文字, 也没有鼻子。 -->
+  <button id="estop" aria-label="急停"></button>
 </div>
 
 <!-- 对话记录(左, 往上提) + 两个立体图标钮(右, 无文字) -->
@@ -241,12 +299,12 @@
   <div id="acts">
     <button id="bCar" aria-label="连车">
       <!-- 蓝牙符文 = "连" -->
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M6.6 7.4 17.4 16.6 12 21V3l5.4 4.4L6.6 16.6"/></svg>
     </button>
     <button id="bMic" aria-label="开始听">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
            stroke-linecap="round" stroke-linejoin="round">
         <rect x="9" y="2.6" width="6" height="11" rx="3"/>
         <path d="M5.4 11.4a6.6 6.6 0 0 0 13.2 0"/><path d="M12 18v3.4"/></svg>
@@ -254,8 +312,20 @@
   </div>
 </div>
 
-<!-- 车辆状态 —— 放最下面 -->
-<div id="hud">·</div>
+<!-- 最下面: 速度上限圆盘 + 车辆状态 -->
+<div id="bottom">
+  <div id="dial" aria-label="地面速度上限">
+    <svg viewBox="0 0 64 64">
+      <!-- 270° 的底槽: 缺口留在正下方(从 135° 起画 270°, 转 135° 让它居下) -->
+      <circle class="track" cx="32" cy="32" r="26"
+              stroke-dasharray="122.52 163.36" transform="rotate(135 32 32)"/>
+      <circle class="arc" id="dialArc" cx="32" cy="32" r="26"
+              stroke-dasharray="0 163.36" transform="rotate(135 32 32)"/>
+    </svg>
+    <div id="dialVal">12%</div>
+  </div>
+  <div id="hud">·</div>
+</div>
 
 <details>
   <summary>设置 / 自检</summary>
@@ -327,10 +397,60 @@ function tr(t, cls) {
 let hud = {};
 function draw() {
   $("hud").textContent =
-    `蓝牙 ${hud.ble ? "已连" : "未连"}   听 ${hud.mic ? "开着" : "关着"}   ${hud.sim ? "模拟" : "实发"}\n` +
-    `命令 v=${hud.v || 0} w=${hud.w || 0}   TTL ${hud.ttl ? (hud.ttl / 1000).toFixed(1) + "s" : "-"}   ` +
-    `地面速度上限 ${CAR.max_v}%`;
+    `蓝牙 ${hud.ble ? "已连" : "未连"}  听 ${hud.mic ? "开着" : "关着"}  ${hud.sim ? "模拟" : "实发"}\n` +
+    `v=${hud.v || 0} w=${hud.w || 0}  TTL ${hud.ttl ? (hud.ttl / 1000).toFixed(1) + "s" : "-"}`;
 }
+
+/* ========================================================================
+   2.5) 速度上限圆盘
+   ⚠️⚠️ **只能往下拧, 不能往上拧** —— DIAL_MAX 就是 CAR.max_v 的硬上限(12%), 也就是
+       config.json car.max_v / carbody.py --max-v / CarBLE 内部 ±20% 那道闸的对齐值。
+       往上放开 = 手机侧松了一道闸而车侧还卡着, 两边不一致比限速更危险。
+   ======================================================================== */
+const DIAL_MIN = 4, DIAL_MAX = 12;
+const DIAL_C = 2 * Math.PI * 26;      // 圆的周长(viewBox 里的 r=26)
+const DIAL_SPAN = DIAL_C * 0.75;      // 270° 行程
+
+/* 恢复上次拧到的位置。⚠️ 越界的一律**丢掉不要钳** —— localStorage 是用户能改的,
+   里面躺着 999 的话, "钳到 12" 还得多解释一句, 直接当没存过最省事也最安全。 */
+const savedMaxV = parseInt(localStorage.getItem("car_maxv") || "", 10);
+if (savedMaxV >= DIAL_MIN && savedMaxV <= DIAL_MAX) CAR.max_v = CAR.max_w = savedMaxV;
+
+function dialDraw() {
+  const f = (CAR.max_v - DIAL_MIN) / (DIAL_MAX - DIAL_MIN);
+  $("dialArc").setAttribute("stroke-dasharray", (DIAL_SPAN * f).toFixed(2) + " " + DIAL_C.toFixed(2));
+  $("dialVal").textContent = CAR.max_v + "%";
+}
+/* 从手指落点算角度: 正上方 = 0°, 顺时针为正。下半圆那 90° 是死区, 折到最近那一端。 */
+function dialSet(ev) {
+  const r = $("dial").getBoundingClientRect();
+  const dx = ev.clientX - (r.left + r.width / 2);
+  const dy = ev.clientY - (r.top + r.height / 2);
+  let a = Math.atan2(dx, -dy) * 180 / Math.PI;
+  if (a > 135) a = 135; else if (a < -135) a = -135;
+  const v = Math.max(DIAL_MIN, Math.min(DIAL_MAX,
+              Math.round(DIAL_MIN + (a + 135) / 270 * (DIAL_MAX - DIAL_MIN))));
+  if (v !== CAR.max_v) {
+    /* ⚠️ 转向也一起收 —— 只限前进不限原地打转是很怪的 */
+    CAR.max_v = CAR.max_w = v;
+    try { localStorage.setItem("car_maxv", String(v)); } catch (e) {}
+    tr("地面速度上限 → " + v + "%", "dim");
+  }
+  dialDraw(); draw();      // 已经在走的命令由 keepTick 每帧重新钳位, 不用在这儿动
+}
+$("dial").addEventListener("pointerdown", (ev) => {
+  $("dial").classList.add("drag");
+  try { $("dial").setPointerCapture(ev.pointerId); } catch (e) {}
+  dialSet(ev); ev.preventDefault();
+});
+$("dial").addEventListener("pointermove", (ev) => {
+  if ($("dial").classList.contains("drag")) { dialSet(ev); ev.preventDefault(); }
+});
+$("dial").addEventListener("pointerup", (ev) => {
+  $("dial").classList.remove("drag");
+  try { $("dial").releasePointerCapture(ev.pointerId); } catch (e) {}
+});
+$("dial").addEventListener("pointercancel", () => $("dial").classList.remove("drag"));
 
 /* ========================================================================
    3) 蓝牙 —— 连车 + 12Hz 保活
@@ -394,6 +514,12 @@ function keepTick() {
   let v = 0, w = 0;
   if (now < cmdEnd) { v = cmdV; w = cmdW; }
   else if (cmdEnd) { cmdV = cmdW = 0; cmdEnd = 0; tr("TTL 到 → 自动停", "s"); }
+  /* ⚠️ 这里是全页唯一持续发帧的地方, 所以**闸②的钳位放在这儿最靠得住**:
+     速度圆盘可以在车正走着的时候被拧小 —— 光在 applyCmd 里钳一次不够,
+     那样已经把速度发出去了, 得等这条命令走完才降下来。每一帧都钳一次才是真的"立刻"。 */
+  v = Math.max(-CAR.max_v, Math.min(CAR.max_v, v));
+  w = Math.max(-CAR.max_w, Math.min(CAR.max_w, w));
+  cmdV = v; cmdW = w;
   hud.v = v; hud.w = w; hud.ttl = Math.max(0, cmdEnd - now); draw();
   if (rxChar || hud.sim) writeDrive(v, w);
 }
@@ -446,12 +572,21 @@ const camName = () => (camWant === "user" ? "前" : "后");
 const CAM_ORDER = ["user", "off", "environment"];    // 上 → 中 → 下
 function camSeg() {
   const cur = camStream ? camWant : "off";
-  let i = CAM_ORDER.indexOf(cur);
-  if (i < 0) i = 1;
   const slots = $("camRock").querySelectorAll(".slot");   // ⚠️ 用 querySelectorAll, children 里混着帽子 div
-  for (const b of slots) b.classList.toggle("sel", b.dataset.m === cur);
-  /* 帽子滑动: 每格高 42px(slot 高 42, 帽子 40), 基准 top:4px —— 正好居中 */
-  $("rockThumb").style.transform = "translateY(" + (42 * i) + "px)";
+  let sel = null;
+  for (const b of slots) {
+    const on = (b.dataset.m === cur);
+    b.classList.toggle("sel", on);
+    if (on) sel = b;
+  }
+  /* 帽子滑动: **现量格子位置**再算居中, 不写死像素 —— 这一版把整个摇杆缩了一半,
+     写死 42px 那版会直接把帽子滑出轨道。offsetTop/offsetHeight 的 offsetParent
+     就是 #camRock(它 position:absolute), 所以量到的就是相对轨道的坐标。 */
+  if (sel) {
+    const thumb = $("rockThumb");
+    const top = sel.offsetTop + (sel.offsetHeight - thumb.offsetHeight) / 2;
+    thumb.style.transform = "translateY(" + (top - thumb.offsetTop) + "px)";
+  }
 }
 function camUI(on, msg) {
   $("pvOff").style.display = on ? "none" : "flex";
@@ -679,7 +814,7 @@ function handleText(text) {
 /* ========================================================================
    7) 接线
    ======================================================================== */
-$("nose").addEventListener("click", () => hardStop("(鼻子按钮)"));
+$("estop").addEventListener("click", () => hardStop("(急停按钮)"));
 $("bCar").addEventListener("click", connectCar);
 $("bMic").addEventListener("click", () => (listening ? stopMic() : startMic()));
 $("bSave").addEventListener("click", () => {
@@ -716,6 +851,7 @@ window.addEventListener("pagehide", () => { hardStop("(页面关闭)"); stopCam(
 
 hud.sim = true;                 // 默认模拟! 要先"连车"再手动关掉, 免得误发
 hud.ble = false; hud.mic = false; hud.v = hud.w = 0; hud.ttl = 0;
+dialDraw();                     // 把圆盘画成当前上限(含上面刚恢复的 localStorage 值)
 draw();
 tr("先装 beacio → 点右侧蓝牙图标连车 → 点麦克风图标开始听。", "dim");
 tr("⚠️ 默认是**模拟模式**, 只打印帧不发蓝牙。确认帧对了再取消勾选。", "warn");
