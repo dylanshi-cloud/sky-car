@@ -92,14 +92,21 @@
      ⚠️ 用 contain 不是 cover: cover 会把画面裁到预览框的比例, 左右各切一截 ——
         开车第一视角**看到完整视野**比"没有黑边"重要。竖幅流在窄框里 contain
         几乎正好填满, 只剩左右两条细黑边。 */
-  #preview{position:relative;flex:1 1 auto;min-height:110px;background:#000;
+  /* ⚠️ 2026-09-21 用户「摄像头的页面高度小一点」—— 原来它 flex:1 把余量**全吃光**(844 视口下
+     高到 ~482), 太高了。加个上限: 取景器到手 360 就封顶, 剩下的余量让给下面的对话记录。
+     ⚠️ 这条一改, **脸(连带眼睛)整条往上走** —— 因为取景器在脸上面, 它矮了下面就整体上移。
+        用户"眼睛向上移一点"就是靠这一条达成的(眼睛本来就在 #face 的 flex-start 顶上, 没法再往上)。 */
+  /* ⚠️⚠️ 这条 min-height **不是随手写的**, 它 = 右边那一列「刚好装得下」的高度。
+     取景器一旦矮过它, `overflow:hidden` 就会把那一列从底下**切掉** —— 切掉的正是急停钮。
+     (实测踩过: min-height 还是 110 的时候, 急停钮被裁得一点不剩, 而且因为被裁的盒子
+      **点不到**(elementFromPoint 落回 #face), 那颗最要紧的钮是「看不见 + 按不动」。)
+     算式: 摇杆 108 + 圆盘 90 + 急停 36 = 234, 再加 4 个 gap(gap:12)48 = **282**, 取 284 剩 2px。
+     ⚠️ gap 为什么是 4 个不是 2 个: #rcol 的 ::before/::after 两个弹性空档**也是 flex 子项**,
+        照样吃 gap —— 漏算这 24px 就是"明明算够了却还是被切"。
+     ⚠️ 宁可让页面往下滚, 也不许把急停钮切掉半个; 「设置」展开时同理(不必再写额外的
+        `body:has(details[open])` 兜底了 —— 这条下限已经把那种情形一起管住)。 */
+  #preview{position:relative;flex:1 1 auto;min-height:284px;max-height:360px;background:#000;
            border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  /* ⚠️⚠️ 「设置」一展开, 右边那列(摇杆 108 + 间距 16 + 圆盘 90 + 首尾空档的 gap ≈ 246)
-     就把取景器压到 min-height 那 110px, 圆盘被 overflow:hidden **从底下切掉半个**(实测)。
-     展开时把下限抬到刚好装得下整列 —— 让页面**改成往下滚**, 也别切掉圆盘。
-     ⚠️ `:has()` 要 Safari 15.4+ / Chrome 105+; 本页只跑 iOS Safari 和桌面 Chrome, 够用
-        (car.html 没有 face.html 那个 Chromium 62 的包袱)。 */
-  body:has(details[open]) #preview{min-height:250px}
   #preview video{position:absolute;left:0;top:0;width:70%;height:100%;
                  object-fit:contain;display:block;background:#000}
   #pvOff{position:absolute;left:0;top:0;width:70%;bottom:0;display:flex;align-items:center;
@@ -114,9 +121,12 @@
         往两边撑: 圆盘往下、摇杆**同时往上**, 而用户只要圆盘往下。
         改用**首尾两个弹性空档**, 上:下 = 2:1 按余量分配 ⇒ 整组压在下半区,
         而且比例是活的, 矮视口自己会收, 不用写死 px。 */
+  /* ⚠️ gap 16 → **12**: 这一列现在是三件东西(摇杆 + 圆盘 + 急停), 4 个 gap 一路算下来
+     16 的话整列要 298, 取景器装不下就得抬高下限 —— 抬下限 = 眼睛跟着往下走, 得不偿失。
+     12 正好让急停钮的触摸热区(往外扩 12px)跟圆盘**刚好相接不重叠**, 一个像素都不抢。 */
   #rcol{position:absolute;right:6px;top:0;bottom:0;width:90px;
         display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
-        gap:16px}
+        gap:12px}
   /* ⚠️ 两个空档就是普通 flex 子项, `flex:2` / `flex:1` 把自由度按 2:1 分掉。
      空元素不写 width 的话在竖排里会被压成 0 宽, 无所谓 —— 它只负责占高度。 */
   #rcol::before,#rcol::after{content:"";display:block;flex:0 1 0}
@@ -153,8 +163,13 @@
   /* ---- 脸: 变形金刚那路数的眼睛(角形金属框 + 青辉 + 白色亮核) + 中间的急停钮 ---- */
   /* ⚠️ 高度必须 ≥ 急停钮的 top+height(56+36=92), 否则那个 absolute 的钮会溢出到
      #midRow 上去; 上面那 56px 正好装眼睛(眼高 52)。多出来的几 px 是余量。 */
+  /* ⚠️ 2026-09-21 用户「瞳距再宽一些」: gap 是**由瞳距倒推**的 —— 瞳距 = 眼宽 88 + gap。
+     92 → **112** 就是瞳距 180 → **200**。
+     ⚠️ 上限 = 视口宽 − 左右内边距 − 双眼总宽: 320 视口下是 304 − 176 = **128**(瞳距 216)。
+        取 112 留了余量, 320 上仍然排得开。
+     ⚠️ 摇杆也跟着这段 gap 走(它居中在两眼之间), 所以它现在的余量从 2px 变成了 12px。 */
   #face{flex:0 0 auto;position:relative;height:98px;
-        display:flex;justify-content:center;align-items:flex-start;gap:92px}
+        display:flex;justify-content:center;align-items:flex-start;gap:112px}
   /* 角形金属框。两只眼的顶边都**朝鼻子那侧压下来** —— 这一斜就是"坏笑/不屑"的全部来源。
      ⚠️ clip-path 会把 box-shadow 一起裁掉, 所以外投影只能用 filter:drop-shadow(父级那个)。
      ⚠️ 用 polygon 就**不能**再写 border-radius, 两者互相覆盖。 */
@@ -217,10 +232,11 @@
      ⚠️ 护圈是 box-shadow 的 0 0 0 Npx(spread)描的 —— 它**跟着 border-radius 一起变形**,
         所以描出来的还是一圈同形状的轮廓, 不是个方框。它是"底座", 不是描边。
      ⚠️ 它**常驻在屏幕上**, 不许藏进 <details> —— 出事时手要去摸的就这一个东西。 */
-  /* ⚠️ 2026-09-21 用户要求「停止按钮放在右侧」—— 它原来蹲在两眼正中(那是"鼻子"的位置),
-     那个位置现在让给摇杆。放右侧是给**拇指**留的: 右手握机, 拇指自然落在屏幕右缘。
-     ⚠️ 热区(::before 往外扩 12px)探到右边缘 388px, 屏宽 390 —— 留 2px, 不出屏。 */
-  #estop{position:absolute;right:14px;top:31px;width:36px;height:36px;
+  /* ⚠️ 2026-09-21 用户「刹车按钮放在速度圆盘下面」—— 它从 #face 挪进了取景器右边那一列,
+     排在 #dial 底下。**这不是 absolute 了**, 是那一列的第三个 flex 子项(摇杆 108 + 圆盘 90 + 它 36)。
+     ⚠️ 热区(::before 往外扩 12px)往上会够到圆盘下沿 —— 列内 gap **12** ⇒ 两边的热区
+        正好**相接不重叠**(再小 1px 就抢圆盘的事件了, 所以 #rcol 的 gap 不能小于 12)。 */
+  #estop{flex:0 0 auto;position:relative;width:36px;height:36px;
          padding:0;border:0;
          border-radius:10% 10% 34% 34% / 12% 12% 44% 44%;
          background:radial-gradient(ellipse at 38% 24%,#ff9d8e 0%,#ff4436 42%,#c01508 76%,#7a0a03 100%);
@@ -246,29 +262,44 @@
                     0 2px 4px rgba(0,0,0,.6)}
 
   /* ---- 摇杆: 长在**鼻子**位置的手动操纵杆(前后 + 左右转) ----
-     ⚠️⚠️ 宽度被**双眼之间的空档锁死**: 瞳距 180 − 眼宽 88 = **92px**。取 88 是留 2px 边,
+     ⚠️⚠️ 宽度被**双眼之间的空档锁死**: 瞳距 200 − 眼宽 88 = **112px**。
         再宽就压到眼睛(眼睛的 clip-path 底边不收缩, 是满宽的, 蹭上就是"鼻子糊在眼睛上")。
+     ⚠️⚠️ 2026-09-21 用户「摇杆底座设计成纵向的类椭圆形状, 椭圆上宽下窄」→ 再「摇杆底座小一半」。
+        尺寸一路 88×88(正圆) → 76×92 → **38×46**(正是 76×92 的一半), 形状靠斜杠写法:
+          横半径 50%(=半宽 19, 左右两侧都是"整圆的一半", 所以左右缘是光滑的竖向弧)
+          竖半径 上 58% / 下 42%(=上弧高 26.7, 下弧高 19.3)
+        最宽那一点落在**从上往下 58%** 处 ⇒ 上半是个舒展的大圆顶, 下半收得急而窄 = 蛋形。
+        ⚠️ 反过来写(上 42 / 下 58)就成"上窄下宽"的倒蛋了, 用户要的是**上宽下窄**。
+        ⚠️ 缩到一半时**杆头必须跟着缩**(32 → 16), 否则 32 的球压在 38 宽的底盘上,
+           行程只剩 1px, 等于不能推 —— 见下面 STICK_RX/RY 那段。
+        ⚠️ 上下位置仍取 top:3 —— 46 高正好让底盘中心落在 26, 跟眼睛(高 52)的**中线齐平**,
+           它还是"长在两眼之间的鼻子", 不用另外对。
+        ⚠️ 再往上加高有天花板: #face 只有 98 高(取景器已经占掉上面了)。
      ⚠️ touch-action:none —— 不写的话手指一拖整个页面跟着滚, 杆就抓不住了(同 #dial)。
      ⚠️ 底盘/护圈/球面光的写法与 #dial 逐条一致(径向渐变 + box-shadow spread 描环),
         一眼能看出这俩是同一套控件语言。 */
-  #stick{position:absolute;left:50%;top:5px;margin-left:-44px;width:88px;height:88px;
-         border-radius:50%;touch-action:none;
+  #stick{position:absolute;left:50%;top:3px;margin-left:-19px;width:38px;height:46px;
+         border-radius:50% 50% 50% 50% / 58% 58% 42% 42%;touch-action:none;
          background:radial-gradient(circle at 38% 26%,#4d6f86 0%,#263b4e 34%,#111e2a 66%,#070c12 100%);
-         box-shadow:inset 0 3px 2px rgba(255,255,255,.22),
-                    inset 0 -8px 14px rgba(0,0,0,.78),
-                    0 0 0 3px #0d141c, 0 0 0 4px var(--line2),
-                    0 8px 16px rgba(0,0,0,.7)}
+         /* ⚠️ 内高光/内阴影/护圈的 px 全都**跟着缩了一半**(底盘 88 → 38) —— 不缩的话
+            3px 的护圈压在 38 宽的底盘上占掉 8%, 看着是两个厚环而不是一圈细边。 */
+         box-shadow:inset 0 1.5px 1px rgba(255,255,255,.22),
+                    inset 0 -4px 7px rgba(0,0,0,.78),
+                    0 0 0 2px #0d141c, 0 0 0 3px var(--line2),
+                    0 4px 8px rgba(0,0,0,.7)}
   /* 十字刻度(上=前 下=后 左右=转)。⚠️ 两个伪元素各画一条直线, 不引多余 DOM。
      ⚠️ 用 rgba 的淡蓝而不是纯灰 —— 在深蓝底上灰线会发脏。 */
   #stick::before,#stick::after{content:"";position:absolute;background:rgba(120,170,205,.17)}
-  #stick::before{left:50%;top:9px;bottom:9px;width:1px;margin-left:-.5px}
-  #stick::after{top:50%;left:9px;right:9px;height:1px;margin-top:-.5px}
-  /* 只有杆头这一层会动(同 #dialKnob 的分工: 底盘不动, 让指针走)。 */
-  #stickKnob{position:absolute;left:50%;top:50%;width:32px;height:32px;margin:-16px 0 0 -16px;
+  #stick::before{left:50%;top:5px;bottom:5px;width:1px;margin-left:-.5px}
+  #stick::after{top:50%;left:5px;right:5px;height:1px;margin-top:-.5px}
+  /* 只有杆头这一层会动(同 #dialKnob 的分工: 底盘不动, 让指针走)。
+     ⚠️ 用户要**橙色柄**。冷蓝底盘配暖橙杆头, 一眼就能把"杆"从盘面上认出来 ——
+        这比原来那颗跟底盘同色系的蓝珠子好读得多(原来推出去要靠影子才看得出偏没偏)。 */
+  #stickKnob{position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;
              border-radius:50%;pointer-events:none;
-             background:radial-gradient(circle at 38% 28%,#eafcff 0%,var(--acc) 34%,#0d5a78 78%,#062a38 100%);
-             box-shadow:0 0 10px 2px rgba(79,201,240,.5),
-                        inset 0 -3px 6px rgba(0,0,0,.5), 0 3px 7px rgba(0,0,0,.6);
+             background:radial-gradient(circle at 38% 28%,#ffe6c2 0%,#ff9d24 36%,#b4520a 78%,#3a1a02 100%);
+             box-shadow:0 0 5px 1px rgba(255,150,40,.55),
+                        inset 0 -1.5px 3px rgba(60,20,0,.55), 0 1.5px 4px rgba(0,0,0,.6);
              transition:transform .09s ease-out}
   /* ⚠️ 手指按着的时候**不许有缓动** —— 有 transition 的话杆头追不上手指, 看着像"拖不动" */
   #stick.drag #stickKnob{transition:none}
@@ -325,10 +356,23 @@
     #dial{width:64px;height:64px}
     #dialKnob i{top:7px;width:5px;height:15px;margin-left:-2.5px;border-radius:2px}
     #dialVal{margin-top:-8px;font:600 12px/16px ui-monospace,Menlo,monospace}
+    /* ⚠️ 急停钮现在也住这一列里了 ⇒ 矮视口必须把**整列一起缩小**, 否则它会跟圆盘一起
+       被取景器的 overflow:hidden 从底下切掉 —— 这是最不能少的一颗钮。
+       算过: (78 + 64 + 32) + 4×12(gap) = **222**px。再配下面那条 min-height 兜底。 */
+    #rcol{gap:12px}
+    #camRock{height:78px}
+    #camRock .slot svg{width:16px;height:16px}
+    #rockThumb{left:7px;width:24px;height:24px;border-radius:12px}
+    #estop{width:32px;height:32px}
+    /* ⚠️ 兜底: 取景器不许矮过整列的高度。只有守住了这条, 急停钮才**永远**看得见 ——
+       宁可让页面往下滚, 也不许把它切掉半个。 */
+    #preview{min-height:224px}
   }
 
   /* ---- 中段: 对话记录(整行) + **嵌在对话框里面**的竖排两个立体图标钮 ---- */
-  #midRow{flex:0 0 auto;position:relative;height:158px}
+  /* ⚠️ flex-grow:1 —— 取景器封顶后腾出来的余量全归它(不这么写页面底部会空一块)。
+     高度 158 仍是它的**基准**; 视口矮的时候按 158 排, 高的时候才长。 */
+  #midRow{flex:1 1 auto;position:relative;height:158px;min-height:158px}
   /* ⚠️ 高度写死、不随内容长 —— 否则一说起话来它就把上面的取景器越挤越小(实测 342→280px)
      ⚠️ 右边 padding 48px 是留给那两个钮的 —— 不加的话字会钻到按钮底下。 */
   #tr{height:100%;white-space:pre-wrap;word-break:break-word;
@@ -406,19 +450,20 @@
     <div id="dialKnob"><i></i></div>
     <div id="dialVal">12%</div>
   </div>
+  <!-- 急停(刹车)。⚠️ 用户要求挂在**速度圆盘下面**, 所以它是这一列的第三个格子。
+       ⚠️ 它必须常驻在屏幕上 —— 但挂进 #preview(overflow:hidden) 里有被切的风险, 见
+          @media (max-height:640px) 那段兜底(矮视口把整列一起缩小, 保证它不被切掉)。 -->
+  <button id="estop" aria-label="急停"></button>
   </div><!-- /#rcol -->
 </div>
 
-<!-- 脸: 变形金刚那路数的角形眼(金属框 + 青辉 + 白色亮核)
-     + **两眼正中那根摇杆(鼻子)** + **右侧的急停大红钮**。
-     ⚠️ 急停按钮**必须常驻在屏幕上**, 不许藏进 <details> 或需要滚动才看得到 —— 它比语音可靠。 -->
+<!-- 脸: 变形金刚那路数的角形眼(金属框 + 青辉 + 白色亮核) + **两眼正中那根摇杆(鼻子)**。
+     ⚠️ 急停钮已经挪走了(用户要求挂在速度圆盘下面), 现在在取景器右边那一列里。 -->
 <div id="face">
   <div class="eye"><i class="glow"></i><i class="pupil"></i></div>
   <div class="eye" id="eye2"><i class="glow"></i><i class="pupil"></i></div>
-  <!-- 手动操纵杆。没有文字: 上=前 下=后 左右=转, 靠盘面那两条十字刻度读。 -->
+  <!-- 手动操纵杆。没有文字: 上=前 下=后 左右=转, 靠盘面那两条十字刻度读。杆柄是**橙色**的。 -->
   <div id="stick" aria-label="手动摇杆"><i id="stickKnob"></i></div>
-  <!-- 3D 急停蘑菇钮, 挂在**右侧**。没有文字。 -->
-  <button id="estop" aria-label="急停"></button>
 </div>
 
 <!-- 对话记录(左, 往上提) + 两个立体图标钮(右, 无文字) -->
@@ -727,16 +772,27 @@ function applyCmd(doWhat, secs) {
 const STICK_DEAD_M  = 0.16;   // 死区: 杆头推不到行程的 16% 就当没推(防手抖)
 const TURN_DEAD     = 15;     // 左右偏角 ≤ 15° 不转
 const STRAIGHT_CONE = 30;     // 正前/正后 30° 锥内, 前进分量按满档
-const STICK_TRAVEL  = 26;     // 杆头最大行程(px)。26 + 杆头半径 16 = 42 < 底盘半径 44, 不越界
+/* ⚠️⚠️ 底盘从**正圆**改成**竖椭圆**之后, 行程就不是一个数了 —— 横向只剩 20px 的余量,
+   竖向有 28px。原来那套"圆半径 + 按距离钳位"横着推会**把杆头戳出底盘边缘**。
+   改成**椭圆钳位**: (dx,dy) 各按自己的半径归一化成 k, k>1 时沿径向等比缩回来 ⇒
+   杆头永远贴着内椭圆走, 横竖都是"推到头"。顺带 m 也直接用这个 k, 含义更准: m=1 = 推到底。
+   ⚠️ 半径的来历: 底盘半宽 19 − 杆头半径 8 − 1(护圈) = 10; 半高 23 − 8 − 1 = 14。 */
+const STICK_RX      = 10;     // 内椭圆横半径
+const STICK_RY      = 14;     // 内椭圆竖半径
 const STICK_TTL     = 320;    // 手指停住不动时, 每帧续命多长
 
 const stickEl = $("stick"), knobEl = $("stickKnob");
+/* (dx,dy) → 归一化椭圆半径: 0=正中, 1=贴着内椭圆, >1=已经越界 */
+function stickK(dx, dy) {
+  const ax = dx / STICK_RX, ay = dy / STICK_RY;
+  return Math.sqrt(ax * ax + ay * ay);
+}
 function stickKnobTo(dx, dy) {
   knobEl.style.transform = "translate(" + dx.toFixed(1) + "px," + dy.toFixed(1) + "px)";
 }
 /* 由杆头位移算出 (stickV, stickW); 返回给对话框显示的那句话(没在动就返回 "") */
 function stickCalc(dx, dy) {
-  const m = Math.min(1, Math.sqrt(dx * dx + dy * dy) / STICK_TRAVEL);
+  const m = Math.min(1, stickK(dx, dy));
   if (m < STICK_DEAD_M) { stickV = stickW = 0; return ""; }
   /* θ: 0°=正上, ±90°=正左右, ±180°=正下 */
   const th  = Math.atan2(dx, -dy) * 180 / Math.PI;
@@ -772,8 +828,8 @@ function stickMove(e) {
   const r = stickEl.getBoundingClientRect();
   let dx = e.clientX - (r.left + r.width / 2);
   let dy = e.clientY - (r.top + r.height / 2);
-  const d = Math.sqrt(dx * dx + dy * dy);
-  if (d > STICK_TRAVEL) { dx = dx / d * STICK_TRAVEL; dy = dy / d * STICK_TRAVEL; }
+  const k = stickK(dx, dy);
+  if (k > 1) { dx /= k; dy /= k; }       // 越界就沿径向等比缩回内椭圆上(见 STICK_RX 那段注释)
   stickKnobTo(dx, dy);
   const lab = stickCalc(dx, dy);
   if (lab) {
@@ -811,6 +867,10 @@ function stickUp(e) {
 }
 stickEl.addEventListener("pointerup", stickUp);
 stickEl.addEventListener("pointercancel", stickUp);
+/* ⚠️ 摄像头摇杆的帽子位置是**现量**出来的(offsetTop/offsetHeight), 而它的尺寸在
+   `@media (max-height:640px)` 里会变 ⇒ 视口一变必须重算一次, 否则帽子会停在旧格子上。
+   ⚠️ iOS Safari 地址栏收放也走这个事件, 顺便一起兜住。 */
+window.addEventListener("resize", () => camSeg());
 
 /* ========================================================================
    3.5) 取景器 —— 手机架在车上, 看着画面开(第一视角)
