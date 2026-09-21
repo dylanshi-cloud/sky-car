@@ -680,7 +680,10 @@ let hud = {};
 function draw() {
   $("hud").textContent =
     `蓝牙 ${hud.ble ? "已连" : "未连"}  听 ${hud.mic ? "开着" : "关着"}  ${hud.sim ? "模拟" : "实发"}\n` +
-    `v=${hud.v || 0} w=${hud.w || 0}  TTL ${hud.ttl ? (hud.ttl / 1000).toFixed(1) + "s" : "-"}`;
+    `v=${hud.v || 0} w=${hud.w || 0}  TTL ${hud.ttl ? (hud.ttl / 1000).toFixed(1) + "s" : "-"}\n` +
+    /* ⚠️「已发 N 帧」+ 写法 是**2026-09-21 真机"连上了但车不动"时的唯一判据**:
+       帧没走出去 / 走了但车不认, 这两种在这行数字上一眼分开。 */
+    `已发 ${txN} 帧  写法 ${writeMode || "(未定)"}  失败 ${txErr}`;
 }
 
 /* ========================================================================
@@ -749,25 +752,33 @@ $("dial").addEventListener("pointercancel", () => $("dial").classList.remove("dr
    3) 蓝牙 —— 连车 + 12Hz 保活
    ======================================================================== */
 let dev = null, rxChar = null, writing = false;
-/* ⚠️⚠️ 写特征值的两种模式 —— 这是本页与**能跑通的 PC 路径之间唯一的实质差异**(2026-09-21 真机定位):
-     · `carbody.py` → `ai_car.py` 的 `CarBLE.write_drive()` 用的是 **`response=True`(等车确认)**;
-     · 本页原来从头到尾用 **`writeValueWithoutResponse`(不等确认)**。
-   两种在**空闲时都能跑**(链路稳、保活正常), 但一收到**真正的运动帧**车就把链路掐了
-   (`gattserverdisconnected` → 页面上"⚠️ 蓝牙断: 车/系统断开")。
-   ⚠️ PC 侧对照实验证明了**不是车的问题**: 同样的帧、同样 12% 持续前进, PC 从头到尾 `ble=up`。
-   ⇒ 改成**优先带回应的写法**, 不被支持(`NotSupportedError`)再退回不带回应。
-   `writeMode` 每次新连接都要清回 null —— 换一台设备可能支持得不一样。 */
-let writeMode = null;                  // null=还没定 / "ack"=等确认 / "noack"=不等
+/* ⚠️⚠️ 写特征值的两种模式(2026-09-21 真机两轮核实):
+     · `carbody.py` → `ai_car.py` 的 `CarBLE.write_drive()` 用的是 `response=True`(等车确认);
+     · 本页用 `writeValueWithoutResponse`(不等确认)。
+   PC 侧曾以为这是"能跑通的 PC 路径 vs 掉线的 iOS 路径"的唯一差异, 但真机第二轮否掉了:
+   改成带回应之后**连接反而稳住了**(说明带回应那条在 iOS 上根本没把帧发出去 ——
+   没帧就进不了远程模式, 也就不会被远程模式的 1s 看门狗踢),
+   于是车"连上了却一动不动"。⇒ 见下面那段, **默认回到 noack**。 */
+/* ⚠️⚠️ 2026-09-21 真机第二轮: 上一版"优先带回应(ack)"在手机上**连接保住了但车一动不动**。
+   能推出的事实: ①车没被踢 ⇒ 有帧在流(否则远程模式 1s 看门狗会踢) ②车不动 ⇒ 帧车不认。
+   最可疑的是 **beacio 的 `writeValue`(带回应) 在 iOS 上"静默 resolve 但没真发"** ——
+   它不抛 `NotSupportedError`, 所以上一版的降级分支**永远走不到**, 于是全页都在用一条不工作的写法。
+   ⇒ **默认改回 `noack`**(这是之前真机观察到"帧确实到达了车"的那条写法),
+     带回应改成**网址显式指定** `?ack=1` 才用(留着以后在别处复验)。
+   ⚠️ `txN`(真发出去的帧数)与 `txErr`(失败数)现在**直接显示在「车辆状态」里** ——
+     "连上了但车不动"时先看这两个数: 帧数不涨=没发出去, 涨了=发了车不认, 两种病治法完全不同。 */
+const FORCE_ACK = /[?&]ack=1/.test(location.search);
+let writeMode = FORCE_ACK ? "ack" : "noack";   // "ack"=等确认 / "noack"=不等
 let noCarHinted = false;               // "还没连车"那句只提示一次
+let txN = 0, txErr = 0;                // 真发出去的帧数 / 写失败次数
 function bleWrite(u8) {
   if (writeMode === "noack") return rxChar.writeValueWithoutResponse(u8);
-  if (writeMode === "ack")   return rxChar.writeValue(u8);
-  return rxChar.writeValue(u8).then(
-    () => { writeMode = "ack"; dbg("蓝牙写法: 带回应(ack)"); },
+  if (writeMode === "ack")   return rxChar.writeValue(u8).then(
+    () => {},
     (e) => {
       if (e && e.name === "NotSupportedError") {      // 这个特征不支持带回应写
         writeMode = "noack";
-        dbg("蓝牙写法: 这个特征不支持带回应, 退回不带回应");
+        tr("蓝牙: 这车不支持带回应写, 已退回不带回应", "dim");
         return rxChar.writeValueWithoutResponse(u8);
       }
       throw e;
@@ -817,7 +828,8 @@ async function connectCar() {
       optionalServices: [NUS],
     });
     lastDev = dev;                       // 记住它, 断了靠它自愈
-    writeMode = null;                    // 新连接 = 重新探一次写法(换台车可能支持得不一样)
+    writeMode = FORCE_ACK ? "ack" : "noack";
+    txN = 0; txErr = 0;
     if (reconTimer) { clearTimeout(reconTimer); reconTimer = null; reconN = 0; }
     dev.addEventListener("gattserverdisconnected", () => carDrop("车/系统断开"));
     const srv = await dev.gatt.connect();
@@ -828,6 +840,8 @@ async function connectCar() {
     noCarHinted = false;
     hud.ble = true; $("bCar").classList.add("on"); draw();
     tr("✓ 已连车 " + (dev.name || dev.id) + " , 已发进遥控模式", "s");
+    tr("蓝牙写法: " + (writeMode === "ack" ? "带回应" : "不带回应") +
+       (FORCE_ACK ? " (网址 ?ack=1 指定)" : ""), "dim");
   } catch (e) {
     dbg("连车失败: " + e.name + " — " + e.message);
     tr("✗ 连车失败（" + e.name + "）", "e");
@@ -851,7 +865,7 @@ function reconStep() {
       const svc = await srv.getPrimaryService(NUS);
       const ch  = await svc.getCharacteristic(RX);
       dev = lastDev; rxChar = ch;
-      writeMode = null;                 // 重连 = 重新探
+      writeMode = FORCE_ACK ? "ack" : "noack";
       await bleWrite(enterRemote());
       noCarHinted = false;
       hud.ble = true; $("bCar").classList.add("on"); draw();
@@ -883,7 +897,8 @@ function writeDrive(v, w) {
   if (writing) return;                 // 上一帧没写完就丢了重来, 保活宁可丢帧也不排队
   writing = true;
   bleWrite(driveCmd(v, w))
-    .catch((e) => carDrop("写失败 " + e.name))
+    .then(() => { txN++; })            // 只有真 resolve 的才算发出去(「车辆状态」里看得到)
+    .catch((e) => { txErr++; carDrop("写失败 " + e.name); })
     .finally(() => { writing = false; });
 }
 
