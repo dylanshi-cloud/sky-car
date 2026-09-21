@@ -642,10 +642,24 @@ function nbFrame(b1, b2, c, data) {
   return new Uint8Array([0x55, 0xAA].concat(body, [ck & 0xFF, (ck >> 8) & 0xFF]));
 }
 const enterRemote = () => nbFrame(0x0A, 0x03, 0x7A, [0x01, 0x00]);
-function driveCmd(v, w) {
-  /* data = speed(2, 有符号 LE) + turn(2)
-     ⚠️ JS 的 & 作用于 int32, 负数照样取到正确的补码低 16 位(-12 & 0xFFFF = 65524) */
-  v = Math.round(v); w = Math.round(w);
+/* ⚠️⚠️⚠️ **入参是百分比, 帧里要填的是 ±32767 的原始值 —— 这里必须换算。**
+   2026-09-21 真机定案: 本页原来把百分比**直接当原始值填进帧**, 于是
+   "12%" 发的是 `0x000c` = 12/32767 ≈ **0.04%** —— 车收到的是个合法却几乎为零的速度,
+   表现就是**连得上、不掉线、车一动不动**(两个平台的网页都这样, 所以绝不是 iOS 的锅)。
+   能跑的另一条路 `ai_car.CarBLE.write_drive()` 写的是 `int(v/100*32767)`:
+   12% → **3932(0x0F5C)**, 两者差 **327.67 倍**。
+   ⚠️ 别把它当"参数微调"记: 对不上的不是大小, 是**标度** —— 拿 12 去调参数永远调不出来。
+   ⚠️ JS 的 `&` 作用于 int32, 负数照样取到正确的补码低 16 位(-3932 & 0xFFFF = 61604)。
+   对照(与 ninebot.py 出的一致): 停 `…7b 00 00 00 00 71 ff` / 前12% `…7b 5c 0f 00 00 06 ff`
+   / 后12% `…7b a4 f0 00 00 dd fd` / 左12% `…7b 00 00 5c 0f 06 ff` / 右12% `…7b 00 00 a4 f0 dd fd`
+   / 前50% `…7b ff 3f 00 00 33 fe`。 */
+function driveCmd(vPct, wPct) {
+  /* data = speed(2, 有符号 LE) + turn(2) */
+  /* ⚠️ 用 `Math.trunc` 不用 `Math.round`: Python 那条能跑的路写的是 `int(...)`, 是**向零截断**。
+     两者在 50% 上会差一个数(16383.5 → round 16384 / trunc 16383), 物理上无所谓,
+     但"与已验证路径逐字节相同"这件事本身值钱 —— 出问题时能立刻排除标度这个变量。 */
+  const v = Math.trunc(vPct / 100 * 32767);
+  const w = Math.trunc(wPct / 100 * 32767);
   const sp = v & 0xFFFF, tr = w & 0xFFFF;
   return nbFrame(0x0A, 0x03, 0x7B, [sp & 0xFF, (sp >> 8) & 0xFF, tr & 0xFF, (tr >> 8) & 0xFF]);
 }
