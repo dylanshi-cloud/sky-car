@@ -648,6 +648,8 @@ const sec = (x, dflt, cap) => {
 
 /* 动作 → 中文。⚠️ 只给**人看**的这一层用; 帧里的 v/w 是后台信息, 不进对话框。 */
 const CN = { forward: "前进", back: "后退", left: "左转", right: "右转", stop: "停" };
+/* 动作 → 嘴上说的那一个词。⚠️ 本地命中时大脑没开口, 得自己吱一声, 否则按了/说了没反馈。 */
+const TERSE = { forward: "走", back: "后退", left: "左转", right: "右转", stop: "停了" };
 
 /* 把"动作"落成命令。doWhat: forward|back|left|right|stop */
 function applyCmd(doWhat, secs) {
@@ -789,23 +791,57 @@ const LOCAL = [
   ["左转", "left"], ["往左", "left"], ["向左", "left"], ["左", "left"],
   ["右转", "right"], ["往右", "right"], ["向右", "right"], ["右", "right"],
 ];
+/* ⚠️⚠️ **必须是句首, 或者整句足够短**, 才认作控车意图。
+   这一版开始"既能控车又能聊天", 而「我左边有点疼」「往右看那栋楼」这种句子里
+   藏着"左/右" —— 裸子串匹配会让人**骑着车转出去**。所以长句一律交给云端判。 */
 function localIntent(text) {
   const t = norm(text);
-  for (const [k, c] of LOCAL) if (t.includes(k)) return c;
+  for (const [k, c] of LOCAL) {
+    const i = t.indexOf(k);
+    if (i < 0) continue;
+    if (i === 0 || t.length <= 4) return c;
+  }
   return null;
 }
 
 /* ========================================================================
-   5) 云端大脑 —— 只在本地没命中时才走。~0.5s
-   ⚠️⚠️ `thinking:{type:"disabled"}` 是**必须**的: deepseek-flash 默认开思考,
+   5) 云端大脑 —— 本地没命中才走。**一次调用同时出"动作"和"回话"两行**
+   ⚠️⚠️ 改这一段之前先读这两条铁律:
+     ① **急停绝不经过这里** —— "停"由本地词表在 handleText 里 0 延时处理, 云端只是补充。
+     ② **只认第 1 行行首那个动作词**(`HEAD_ACT`), 认不出就一律"不动"。
+        ⛔ 绝不许拿**整段回话**去扫"前进/左转" —— 一旦扫了, 一句
+        「前面那家店停止营业了吧」能把车按停, 而「我们前进的方向是…」**能让车开出去**。
+        这是"又要聊天又要控车"这一版最容易出人命的地方。
+   ⚠️ `thinking:{type:"disabled"}` 是**必须**的: deepseek-flash 默认开思考,
       实测不关的话 max_tokens 会被 reasoning 吃光, **正文一个字都拿不到**。
    ======================================================================== */
-const SYS = "你是车载助手。只回一个词, 不要标点不要解释, 从这几个里选: " +
-            "前进 后退 左转 右转 停止 无。";
-const LLMW = ["前进", "后退", "左转", "右转", "停止", "停止"];
-const LLMAP = { "前进": "forward", "后退": "back", "左转": "left", "右转": "right", "停止": "stop" };
+const SYS = [
+  "你是装在九号平衡车上的车载语音助手。用户的话可能是让你开车, 也可能只是聊天或提问。",
+  "只输出两行, 不要序号、不要 markdown、不要任何解释:",
+  "第1行: 一个动作词, 只能是 前进 / 后退 / 左转 / 右转 / 停止 / 无",
+  "   · 只有用户**明确让你动**时才写方向词; 聊天、提问、闲聊、问天气、骂你 —— 一律写 无",
+  "第2行: 要说给用户听的话, 口语化一到两句, 总长不超过 40 字",
+  "   · 第1行是方向词 → 说一句简短确认, 例如「好嘞，往前走」",
+  "   · 第1行是 无 → 直接回答用户",
+  "⚠️ 车上是真人骑着, 认错动作会让人摔下去 —— 宁可不动, 不可乱动。",
+].join("\n");
 
-async function askLLM(text) {
+/* ⚠️ 锚在**整段开头**(`^`)。收多少字都只看行首那几个字, 后文里冒出"前进"不会误判。
+   容一点行首的 markdown/引号噪音, 但**绝不放宽到"全文搜索"**。 */
+const HEAD_ACT = /^[\s>*_`"'「【\[（(]*(前进|后退|左转|右转|停止|无)/;
+const ACTMAP = { "前进": "forward", "后退": "back", "左转": "left", "右转": "right", "停止": "stop" };
+
+/* 把模型的输出切成 {动作词, 要说的话}。认不出动作词 → tok=null(不动), 整段当回话。 */
+function splitBrain(acc) {
+  const m = HEAD_ACT.exec(acc);
+  if (!m) return { tok: null, reply: acc.trim() };
+  const after = acc.slice(m[0].length);
+  const nl = after.search(/\r?\n/);
+  /* 一行写到底(没有换行)时, 把动作词后面的同段文本也当回话 —— 模型偶尔不老实换行 */
+  return { tok: m[1], reply: (nl >= 0 ? after.slice(nl + 1) : after).trim() };
+}
+
+async function askBrain(text) {
   const key = localStorage.getItem("ds_key") || "";
   if (!key) { tr("(没设 DeepSeek key, 忽略这句)", "dim"); return; }
   const t0 = performance.now();
@@ -814,7 +850,8 @@ async function askLLM(text) {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
       body: JSON.stringify({
-        model: "deepseek-flash", stream: true, temperature: 0, max_tokens: 16,
+        /* ⚠️ max_tokens 从 16 抬到 220 —— 现在要吐一整句回话, 16 会把话截断成半截 */
+        model: "deepseek-flash", stream: true, temperature: 0, max_tokens: 220,
         thinking: { type: "disabled" },
         messages: [{ role: "system", content: SYS }, { role: "user", content: text }],
       }),
@@ -825,7 +862,7 @@ async function askLLM(text) {
       return;
     }
     const rd = r.body.getReader(), dec = new TextDecoder();
-    let acc = "", buf = "", acted = false;
+    let acc = "", buf = "", acted = false, tok = null;
     for (;;) {
       const { done, value } = await rd.read();
       if (done) break;
@@ -840,22 +877,30 @@ async function askLLM(text) {
         const piece = c && c.delta && c.delta.content;
         if (!piece) continue;
         acc += piece;
-        /* ⚠️ 边收边判: 一看到命令词就立刻发车, 不等它把话说完 */
+        /* ⚠️ 边收边判: 动作词在**第 1 行行首**, 所以一到就能定, 不必等回话写完。
+           ⚠️ `doAction(..., true)` 的 true = **先别出声** —— 等回话行收完统一播,
+              否则"走"和"好嘞往前走"会连着说两遍。 */
         if (!acted) {
-          for (const k of LLMW) {
-            if (acc.includes(k)) {
-              acted = true;
-              const what = LLMAP[k];
-              dbg("大脑往返 " + (performance.now() - t0).toFixed(0) + "ms");
-              tr("大脑 → " + k, "c");
-              doAction(what);
-              break;
-            }
+          const m = HEAD_ACT.exec(acc);
+          if (m) {
+            acted = true; tok = m[1];
+            dbg("大脑判定 " + tok + " (往返 " + (performance.now() - t0).toFixed(0) + "ms)");
+            if (ACTMAP[tok]) { tr("大脑 → " + tok, "c"); doAction(ACTMAP[tok], true); }
           }
         }
       }
     }
-    if (!acted) tr("大脑说「" + acc.trim() + "」→ 不动", "dim");
+    /* 流可能短到一次都没触发上面的判定(比如整段只有一个字), 这里补一次 */
+    const cut = splitBrain(acc);
+    if (!acted) {
+      tok = cut.tok;
+      if (tok && ACTMAP[tok]) { tr("大脑 → " + tok, "c"); doAction(ACTMAP[tok], true); }
+    }
+    /* 回话行缺了就退化成一句简短的; 动作行缺了 = 不动(安全默认, 已经在 splitBrain 里保证) */
+    const speakText = cut.reply || (tok && ACTMAP[tok] ? TERSE[ACTMAP[tok]] : "");
+    if (cut.reply) tr("大脑: " + cut.reply, "c");
+    else dbg("大脑没给回话行");
+    if (speakText) say(speakText);
   } catch (e) {
     dbg("大脑失败: " + e.name + " — " + e.message);
     tr("✗ 大脑连不上，这句没动", "e");
@@ -865,21 +910,41 @@ async function askLLM(text) {
 /* ========================================================================
    6) 语音: 听 (iPhone 自带) + 说 (iPhone 自带)
    ======================================================================== */
-function doAction(what) {
+/* quiet=true → 只动嘴以外的事(不说那个短词), 留给调用方统一开口。
+   ⚠️ 云端那条路必须 quiet —— 大脑马上要给一整句回话, 再叠一个"走"就是连着说两遍。 */
+function doAction(what, quiet) {
   const line = applyCmd(what);
   /* ⚠️ 对话框里只写动作本身。applyCmd 返回的那串里带 v=/w=/秒数, 是后台信息, 进 dbg。 */
   if (line) dbg("命令 " + line);
   if (what) tr("→ " + (CN[what] || what), "s");
-  say({ forward: "走", back: "后退", left: "左转", right: "右转", stop: "停了" }[what] || "");
+  if (!quiet) say(TERSE[what] || "");
 }
+
+/* ---- 说 ----
+   ⚠️⚠️ 这是"边开麦边说话"最要命的一处: 不掐麦克风, 手机**会把自己刚说的话当用户输入再听一遍**
+        → 大脑收到回声 → 又回一句 → 无限循环。所以 speak 前 abort 掉识别, 说完再续上。
+   ⚠️ iOS 的 onend **经常不触发**(尤其中文), 必须配看门狗按字数估时间兜底, 否则说完再也听不到。 */
+let speaking = false, speakSeq = 0, lastSaid = "";
 function say(t) {
   if (!t || !window.speechSynthesis) return;
+  const my = ++speakSeq;
+  lastSaid = t;
   try {
     const u = new SpeechSynthesisUtterance(t);
     u.lang = "zh-CN"; u.rate = 1.1;
     speechSynthesis.cancel();      // ⚠️ 不 cancel 会排队积压, 说一句等三句
+    speaking = true;
+    if (rec) { try { rec.abort(); } catch (e) {} }
+    let done = false;
+    const fin = () => {
+      if (done || my !== speakSeq) return;      // 被后一句顶掉了 → 这算旧账, 不管
+      done = true; speaking = false;
+      if (listening) setTimeout(() => { if (listening && !speaking) { try { rec.start(); } catch (e) {} } }, 350);
+    };
+    u.onend = fin; u.onerror = fin;
     speechSynthesis.speak(u);
-  } catch (e) {}
+    setTimeout(fin, t.length * 260 + 2000);      // 看门狗: 中文 ~260ms/字 + 2s 余量
+  } catch (e) { speaking = false; }
 }
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -900,8 +965,9 @@ function startMic() {
         if (text) handleText(text);
       }
     };
-    /* ⚠️ iOS 上识别会因为静音自己结束 —— 只要还开着听, 就重起 */
-    rec.onend = () => { if (listening) setTimeout(() => { if (listening) { try { rec.start(); } catch (e) {} } }, 250); };
+    /* ⚠️ iOS 上识别会因为静音自己结束 —— 只要还开着听, 就重起。
+       ⚠️ 但**正在说话时不许重起**(那是我们自己 abort 的, 说完由 say() 的 fin 续上), 否则立刻把回话录进去。 */
+    rec.onend = () => { if (listening && !speaking) setTimeout(() => { if (listening && !speaking) { try { rec.start(); } catch (e) {} } }, 250); };
     /* ⚠️ "no-speech" 这类每小时能刷几十条, 全进 dbg; 只有真的没权限才在对话框里说一声 */
     rec.onerror = (e) => {
       dbg("识别错误: " + e.error);
@@ -927,14 +993,24 @@ function stopMic() {
 /* ⚠️ 按钮上**不许有文字**(用户要求纯图标) —— 状态一律靠 .on 那个绿光表达 */
 function syncMic() { $("bMic").classList.toggle("on", listening); hud.mic = listening; draw(); }
 
-/* 急停词命中 → 立刻停, **不问大脑** */
+/* ⚠️ 看到和自己刚说的一模一样(或是它的片段) → 那是扬声器漏进麦克风的回声, 不是用户在说话。 */
+function echoLike(t) {
+  if (!lastSaid) return false;
+  const a = norm(t), b = norm(lastSaid);
+  if (!a || !b) return false;
+  return a === b || (a.length >= 4 && b.indexOf(a) >= 0);
+}
+
+/* 急停词命中 → 立刻停, **不问大脑**。
+   ⚠️ 顺序写死: 急停 → 本地词表 → (都不中才)大脑。**绝不让大脑待在"停"的路径上**。 */
 function handleText(text) {
+  if (echoLike(text)) { dbg("忽略(像是听到自己刚说的): " + text); return; }
   tr("你: " + text, "u");
   if (isStop(text)) { tr("★ 急停口令命中 → 直接停", "s"); hardStop("(急停口令)"); return; }
   const local = localIntent(text);
   /* ⚠️ 不再单独报"本地命中" —— 那是哪一层判的, 属后台信息; doAction 那行「→ 前进」已经说明结果。 */
   if (local) { dbg("本地词表命中 → " + local); doAction(local); return; }
-  askLLM(text);                // 都不中才走云端
+  askBrain(text);              // 都不中才走云端(控车 + 聊天同一个入口)
 }
 
 /* ========================================================================
@@ -1005,7 +1081,10 @@ dialDraw();                     // 把圆盘画成当前上限(含上面刚恢�
 draw();
 tr("先装 beacio → 点右侧蓝牙图标连车 → 点麦克风图标开始听。", "dim");
 tr("⚠️ 默认是**模拟模式**, 只打印帧不发蓝牙。确认帧对了再取消勾选。", "warn");
-if (localStorage.getItem("ds_key")) tr("(已存 DeepSeek key)", "dim");
+if (localStorage.getItem("ds_key"))
+  tr("(已存 DeepSeek key —— 现在**控车和聊天都能用**, 直接说就行)", "dim");
+else
+  tr("(没设 key: 只能听懂「前进/后退/左转/右转/停」这几句, 不能聊天)", "dim");
 
 /* 开页就试着起摄像头(架在车上时省一次点击)。
    ⚠️ iOS 对 getUserMedia 有时认"用户手势" —— 起不来也不报错死, 遮罩会变成可点的重试提示。 */
