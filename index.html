@@ -45,36 +45,58 @@
 -->
 <style>
   :root{color-scheme:dark}
-  html,body{margin:0;background:#05070a;color:#cfe3f2;
+  /* ⚠️ 显式 border-box。默认的 content-box 会让 height:104px 实际渲染成 122px
+     (padding+border 加上去) —— face.html 的嘴巴"老挡住眼睛"就是这个坑, 别再来一次。 */
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#05070a;color:#cfe3f2;
             font:15px/1.6 -apple-system,"PingFang SC",system-ui,sans-serif;
             -webkit-user-select:none;user-select:none;overscroll-behavior:none}
-  body{padding:12px;padding-top:calc(12px + env(safe-area-inset-top,0px));
-       padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
-  h1{font-size:15px;margin:0 0 10px;color:#8fd0ff;font-weight:600}
+  /* 竖排 flex: 取景器吃掉所有余量, 其余按内容高度排。
+     ⚠️ 别用 vh 硬算高度 —— 手机架在车上时地址栏收放会让 vh 变。 */
+  body{display:flex;flex-direction:column;gap:8px;box-sizing:border-box;padding:8px;
+       padding-top:calc(8px + env(safe-area-inset-top,0px));
+       padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
+  h1{font-size:12px;margin:0;color:#8fd0ff;font-weight:600;flex:0 0 auto}
 
-  .row{display:flex;align-items:center;gap:8px;margin-bottom:9px}
-  button{flex:1;padding:14px 10px;border-radius:11px;border:1px solid #24506e;
+  /* ---- 取景器: 架在车上当第一视角 ---- */
+  #preview{position:relative;flex:1 1 auto;min-height:120px;background:#000;
+           border:1px solid #16303f;border-radius:11px;overflow:hidden}
+  /* ⚠️ 用 contain 不是 cover: cover 会把 16:9 的画面裁到预览框的比例,
+     左右两边各切掉一截 —— 开车第一视角**看到完整视野**比"没有黑边"重要。 */
+  #preview video{width:100%;height:100%;object-fit:contain;display:block;background:#000}
+  #pvOff{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;
+         justify-content:center;text-align:center;padding:14px;background:#070d13;
+         color:#8fd0ff;font-size:14px}
+  #pvBadge{position:absolute;left:8px;top:8px;padding:2px 8px;border-radius:8px;
+           background:rgba(5,7,10,.62);color:#8fd0ff;font-size:11.5px}
+
+  .row{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+  .row button{flex:1}
+  button{padding:13px 10px;border-radius:11px;border:1px solid #24506e;
          background:#0d1c28;color:#cfe3f2;font-size:15px;font-weight:600}
   button:active{background:#16303f}
   button:disabled{opacity:.4}
   button.on{background:#123a2a;border-color:#2f7d55;color:#7ff0b0}
 
-  /* 常驻大红急停 —— 最后一道防线, 任何时候都在 */
-  #estop{width:100%;padding:26px;font-size:30px;font-weight:800;letter-spacing:.3em;
-         color:#fff;background:#b3160f;border:2px solid #ff5a4d;border-radius:16px;
-         margin:4px 0 10px}
+  /* 常驻大红急停 —— 最后一道防线, 任何时候都在。
+     ⚠️ flex:0 0 auto 必须写: 父级是竖排 flex, 默认的 flex:1 在这里是**高度**会长满 */
+  #estop{flex:0 0 auto;width:100%;padding:22px;font-size:30px;font-weight:800;
+         letter-spacing:.3em;color:#fff;background:#b3160f;border:2px solid #ff5a4d;
+         border-radius:16px}
   #estop:active{background:#e0221a}
 
-  #hud{border:1px solid #16303f;border-radius:11px;padding:10px 12px;background:#070d13;
-       font:12.5px/1.7 ui-monospace,Menlo,monospace;margin-bottom:9px;white-space:pre-wrap}
+  #hud{flex:0 0 auto;border:1px solid #16303f;border-radius:11px;padding:8px 12px;
+       background:#070d13;font:12px/1.6 ui-monospace,Menlo,monospace;white-space:pre-wrap}
   .ok{color:#5be08a}.bad{color:#ff6b6b}.warn{color:#ffc440}.dim{color:#5d7688}
 
-  #tr{white-space:pre-wrap;word-break:break-word;border:1px solid #16303f;border-radius:11px;
-      padding:10px 12px;background:#070d13;height:34vh;overflow-y:auto;font-size:13.5px}
+  /* ⚠️ 高度写死、不随内容长 —— 否则一说起话来它就把上面的取景器越挤越小(实测 342→280px) */
+  #tr{flex:0 0 auto;height:104px;white-space:pre-wrap;word-break:break-word;
+      border:1px solid #16303f;border-radius:11px;padding:8px 12px;background:#070d13;
+      overflow-y:auto;font-size:13px}
   #tr .u{color:#8fd0ff} #tr .c{color:#cfe3f2} #tr .s{color:#5be08a} #tr .e{color:#ff6b6b}
 
-  details{border:1px solid #16303f;border-radius:11px;padding:10px 12px;background:#070d13;
-          margin-top:9px;font-size:13px}
+  details{flex:0 0 auto;border:1px solid #16303f;border-radius:11px;padding:10px 12px;
+          background:#070d13;font-size:13px}
   summary{cursor:pointer;color:#8fd0ff;font-weight:600}
   input[type=password],input[type=text]{width:100%;box-sizing:border-box;padding:10px;
         border-radius:9px;border:1px solid #24506e;background:#0b1620;color:#cfe3f2;
@@ -85,6 +107,17 @@
 <body>
 
 <h1>Sky 车 · 无 PC 版</h1>
+
+<div id="preview">
+  <video id="pv" playsinline muted autoplay></video>
+  <div id="pvBadge">摄像头 关</div>
+  <div id="pvOff">点这里开摄像头</div>
+</div>
+
+<div class="row">
+  <button id="bFlip">切前/后</button>
+  <button id="bCamOff">关摄像头</button>
+</div>
 
 <button id="estop">停</button>
 
@@ -266,6 +299,66 @@ function applyCmd(doWhat, secs) {
   cmdV = cv; cmdW = cw; cmdEnd = now + t * 1000;
   return `${doWhat} v=${cv} w=${cw} ${t.toFixed(1)}s`;
 }
+
+/* ========================================================================
+   3.5) 取景器 —— 手机架在车上, 看着画面开(第一视角)
+   ⚠️⚠️ iOS 一次只能活**一个**摄像头(WebKit bug 238492, 挂了七八年; bug 264288):
+       去请求第二个摄像头的那一刻, 第一个的 track 会被**静默掐死**, 不报错。
+       ⇒ 切前/后**必须先 stop 掉旧的**再请求新的, 没有别的写法。
+   ⚠️ 绝不能要 audio —— 会跟 SpeechRecognition 抢麦克风。只 video。
+   ======================================================================== */
+const pv = $("pv");
+let camStream = null;
+let camWant = "environment";          // 默认后摄(架在车上朝前看)
+const camName = () => (camWant === "user" ? "前" : "后");
+
+function camUI(on, msg) {
+  $("pvOff").style.display = on ? "none" : "flex";
+  if (!on) $("pvOff").textContent = msg || "点这里开摄像头";
+  $("pvBadge").textContent = on ? ("摄像头 " + camName()) : "摄像头 关";
+}
+
+/* ⚠️ stop 掉并清空, 不留半死不活的 track */
+function stopCam() {
+  if (camStream) { for (const t of camStream.getTracks()) t.stop(); camStream = null; }
+  pv.srcObject = null;
+  camUI(false);
+}
+
+async function startCam(want) {
+  if (want) camWant = want;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    camUI(false, "这个浏览器没有摄像头 API（要 https 或 localhost）");
+    return;
+  }
+  stopCam();                          // ⚠️ 见头部注释: 不先停, iOS 上两个一起死
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: camWant },          // ⚠️ 用 ideal 不用 exact —— exact 在 iOS 上易抛错
+               width: { ideal: 1280 }, height: { ideal: 720 },
+               frameRate: { ideal: 24, max: 30 } },     // 24fps 够用, 别让它满帧发烫
+      audio: false,
+    });
+    pv.srcObject = camStream;
+    camUI(true);
+    tr("✓ 摄像头 " + camName() + " 已开", "s");
+    /* ⚠️ **不要 await play()**: 它的 Promise 要等**第一帧到达**才 settle,
+       流没吐帧时它会一直挂着 ⇒ UI 和日志全卡住(实测就是这么被坑的)。
+       track 活着 = 摄像头真的开了, 播不播得出来是另一回事, 分开处理。 */
+    pv.play().catch((e) => tr("⚠️ 预览播放失败: " + e.name + "（摄像头其实已开）", "e"));
+  } catch (e) {
+    camStream = null;
+    tr("✗ 摄像头失败: " + e.name + " — " + e.message, "e");
+    camUI(false, e.name === "NotAllowedError"
+        ? "没给摄像头权限 —— 点这里重试"
+        : "点这里重试（" + e.name + "）");
+    if (e.name === "NotAllowedError")
+      tr("  设置 → Safari → 相机 是不是被关了? 或地址栏左边「ᴀA」里改权限", "dim");
+  }
+}
+$("bFlip").addEventListener("click", () => startCam(camWant === "user" ? "environment" : "user"));
+$("bCamOff").addEventListener("click", () => { stopCam(); tr("摄像头已关", "dim"); });
+$("pvOff").addEventListener("click", () => startCam());
 
 /* ========================================================================
    4) 本地意图 —— 第一级, 0 延时, 覆盖绝大多数控车命令
@@ -469,9 +562,9 @@ $("bTest").addEventListener("click", () => {
 
 /* ⚠️ 页面被切走/锁屏 → 必须停车。人看不见车的时候, 车不该还在走。 */
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { hardStop("(页面切走)"); stopMic(); }
+  if (document.hidden) { hardStop("(页面切走)"); stopMic(); stopCam(); }
 });
-window.addEventListener("pagehide", () => hardStop("(页面关闭)"));
+window.addEventListener("pagehide", () => { hardStop("(页面关闭)"); stopCam(); });
 
 hud.sim = true;                 // 默认模拟! 要先"连车"再手动关掉, 免得误发
 hud.ble = false; hud.mic = false; hud.v = hud.w = 0; hud.ttl = 0;
@@ -479,6 +572,11 @@ draw();
 tr("先装 beacio 扩展 → 点「连车」→ 点「开始听」。", "dim");
 tr("⚠️ 默认是**模拟模式**, 只打印帧不发蓝牙。确认帧对了再取消勾选。", "warn");
 if (localStorage.getItem("ds_key")) tr("(已存 DeepSeek key)", "dim");
+
+/* 开页就试着起摄像头(架在车上时省一次点击)。
+   ⚠️ iOS 对 getUserMedia 有时认"用户手势" —— 起不来也不报错死, 遮罩会变成可点的重试提示。 */
+camUI(false);
+startCam();
 </script>
 </body>
 </html>
