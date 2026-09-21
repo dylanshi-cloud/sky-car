@@ -34,7 +34,7 @@
      ① **本地急停**: 转写里出现急停词 → 立刻停车, **不问大脑**。
         外加脸上那颗**常驻的红色立体大按钮** —— 一颗凸起来的红色圆钮, 一个字没有,
         形状就是"按下去"的意思。这是最后一道, 比语音可靠。
-     ② **钳位**: 速度一律钳在 max_v/max_w = ±地面速度上限(圆盘可调, 4~12%),
+     ② **钳位**: 速度一律钳在 max_v/max_w = ±地面速度上限(圆盘可调, 10~50%),
         时长钳在 max_step/hold_sec。
         **不信模型给的数**, 只信这里写死的常量。"前进/后退/左转/右转"速度固定取上限。
      ③ **TTL**: 每条运动都有到期时刻, 到点自动归零。再加 12Hz 保活重发
@@ -81,31 +81,42 @@
   h1{font-size:11.5px;margin:0;color:var(--acc);font-weight:600;letter-spacing:.5px;
      flex:0 0 auto;opacity:.85}
 
-  /* ---- 取景器: 架在车上当第一视角 ---- */
+  /* ---- 取景器: 架在车上当第一视角 ----
+     ⚠️⚠️ **画面往左靠, 右边一整条竖带留给按钮**(用户要求): 手机竖着架在车上,
+        iOS 给的就是**竖幅**视频, 所以画面框做成窄的竖长方形贴左边 —— 右边空出来的
+        那条竖带正好装"摄像头摇杆 + 速度圆盘"两个控件。
+     ⚠️ 用 contain 不是 cover: cover 会把画面裁到预览框的比例, 左右各切一截 ——
+        开车第一视角**看到完整视野**比"没有黑边"重要。竖幅流在窄框里 contain
+        几乎正好填满, 只剩左右两条细黑边。 */
   #preview{position:relative;flex:1 1 auto;min-height:110px;background:#000;
            border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  /* ⚠️ 用 contain 不是 cover: cover 会把 16:9 的画面裁到预览框的比例,
-     左右两边各切掉一截 —— 开车第一视角**看到完整视野**比"没有黑边"重要。 */
-  #preview video{width:100%;height:100%;object-fit:contain;display:block;background:#000}
-  #pvOff{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;
+  #preview video{position:absolute;left:0;top:0;width:70%;height:100%;
+                 object-fit:contain;display:block;background:#000}
+  #pvOff{position:absolute;left:0;top:0;width:70%;bottom:0;display:flex;align-items:center;
          justify-content:center;text-align:center;padding:14px;background:var(--panel);
          color:var(--acc);font-size:13.5px}
+
+  /* ---- 取景器右边那一列: 摄像头摇杆(上) + 速度圆盘(下) ----
+     ⚠️ 整列 absolute 贴右, 视频那边靠 left:0 —— 两边各占各的, 谁也不挤谁。
+     ⚠️ 竖直居中: 这一列比取景器矮, 顶上/底下留白比贴边好看。 */
+  #rcol{position:absolute;right:6px;top:0;bottom:0;width:60px;
+        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
 
   /* ---- 摄像头摇杆: 纵向三档 (上=前 中=关 下=后), **纯图标无文字** ----
      一列三个格子 + 一个会滑动的"摇杆帽"(#rockThumb)。点哪格, 帽子滑到哪格。
      ⚠️ 帽子是 z-index:1, 三个 .slot 是 z-index:2 且 flex:1 铺满整条 ——
         所以帽子**永远点不到**, 点哪都落到某个 slot 上, 不用额外处理。
-     ⚠️ 尺寸 = 上一版的一半(46x132 → 26x72)。是小, 但它是"偶尔调一次"的东西, 不是急停。 */
-  #camRock{position:absolute;right:6px;top:50%;transform:translateY(-50%);
-           width:26px;height:72px;padding:2px;border-radius:13px;
+     ⚠️ 尺寸(39x108) = 上一版的 1.5 倍 —— 用户说的"加大 50%"就是这条(26x72 → 39x108)。 */
+  #camRock{position:relative;flex:0 0 auto;width:39px;height:108px;padding:3px;
+           border-radius:19px;
            background:rgba(7,10,15,.72);border:1px solid var(--line2);
            display:flex;flex-direction:column}
   #camRock .slot{flex:1 1 0;position:relative;z-index:2;border:0;padding:0;
-                 background:transparent;border-radius:11px;color:var(--dim);
+                 background:transparent;border-radius:16px;color:var(--dim);
                  display:flex;align-items:center;justify-content:center}
-  #camRock .slot svg{width:13px;height:13px;display:block}
+  #camRock .slot svg{width:19px;height:19px;display:block}
   #camRock .slot.sel{color:var(--acc)}
-  #rockThumb{position:absolute;left:2px;top:3px;width:20px;height:20px;border-radius:10px;
+  #rockThumb{position:absolute;left:3px;top:4px;width:30px;height:30px;border-radius:15px;
              z-index:1;transition:transform .18s ease;
              background:linear-gradient(180deg,var(--acc),var(--acc2));
              box-shadow:inset 0 1px 0 rgba(255,255,255,.4), 0 2px 5px rgba(0,0,0,.6)}
@@ -210,26 +221,50 @@
                     0 0 0 3px #101a24, 0 0 0 4px var(--line2),
                     0 2px 4px rgba(0,0,0,.6)}
 
-  /* 最下面一行: 速度圆盘(左) + 车辆状态(右) */
-  #bottom{flex:0 0 auto;display:flex;gap:9px;align-items:stretch}
-  #hud{flex:1 1 auto;border:1px solid var(--line);border-radius:11px;padding:7px 10px;
-       background:var(--panel);font:10.5px/1.55 ui-monospace,Menlo,monospace;
-       white-space:pre-wrap;color:var(--tx);
-       display:flex;flex-direction:column;justify-content:center}
   .ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.dim{color:var(--dim)}
+  /* 车辆状态读数 —— **折叠进最下面那个「设置」里了**(用户要求), 平时不占屏幕。
+     它就是几行等宽字, 没有它照样开车; 真要排障才展开看。id 没改, draw() 照旧写它。 */
+  #hud{border:1px solid var(--line);border-radius:9px;padding:7px 9px;margin:8px 0 2px;
+       background:#0b141d;font:11px/1.6 ui-monospace,Menlo,monospace;
+       white-space:pre-wrap;color:var(--tx)}
 
-  /* 速度上限圆盘。270° 行程(正下方留 90° 缺口, 这样"到头了"一眼看得出), 拖动/点按都行。
-     ⚠️ 弧线用 **SVG 的 stroke-dasharray** 画, 不用 conic-gradient —— conic 是 Chrome 69+,
-        万一在 Chromium 62 上碰到, 整个 background 声明会被丢掉(同 min()/inset 那类坑)。
+  /* ---- 地面速度上限: **3D 拨动圆盘** ----
+     做成一颗"能拧的实心旋钮", 不是一圈进度条: 盘面用径向渐变做出左上受光、
+     右下入鞘的球面感, 外圈靠 box-shadow 的 spread(0 0 0 3px/4px)描出底座护圈
+     (⚠️ 用 spread 而不是 border —— spread 会**跟着 border-radius 一起变形**, 圆的自是圆;
+        写成 border 再想加个环就得再叠一层元素)。
+     中间那根竖条是**指针**, 挂在 #dialKnob 上跟着值一起转; 数值文本是兄弟节点,
+     所以字不跟着转(转了就歪了)。
+     ⚠️ 不用 conic-gradient / repeating-conic —— Chrome 69+ 才有, 且一旦写进 background
+        简写里, 老引擎会**丢掉整条声明**(同 min()/inset 那类坑)。这里全程只用径向渐变。
      ⚠️ touch-action:none 必须写 —— 否则手指一拖, 页面跟着一起滚, 盘就抓不住了。 */
-  #dial{flex:0 0 auto;position:relative;width:66px;height:66px;touch-action:none}
-  #dial svg{width:100%;height:100%;display:block}
-  #dial .track{fill:none;stroke:#16232e;stroke-width:6}
-  #dial .arc{fill:none;stroke:var(--acc);stroke-width:6;stroke-linecap:round;
-             filter:drop-shadow(0 0 4px rgba(79,201,240,.75))}
-  #dialVal{position:absolute;left:0;right:0;top:50%;margin-top:-7px;text-align:center;
-           font:600 12px/14px ui-monospace,Menlo,monospace;color:var(--acc);
-           pointer-events:none}
+  #dial{flex:0 0 auto;position:relative;width:60px;height:60px;border-radius:50%;
+        touch-action:none;
+        background:radial-gradient(circle at 36% 26%,
+                   #4d6f86 0%,#263b4e 32%,#111e2a 64%,#070c12 100%);
+        box-shadow:inset 0 2px 1px rgba(255,255,255,.26),
+                   inset 0 -5px 9px rgba(0,0,0,.78),
+                   0 0 0 3px #0d141c, 0 0 0 4px var(--line2),
+                   0 6px 12px rgba(0,0,0,.7);
+        transition:transform .05s linear}
+  /* 按下去: 整体下沉 + 内高光收掉 + 外投影变短 —— 三样一起变才"陷得进去"(同急停钮那套) */
+  #dial.drag{transform:translateY(1px) scale(.97);
+        box-shadow:inset 0 1px 1px rgba(255,255,255,.14),
+                   inset 0 5px 10px rgba(0,0,0,.85),
+                   0 0 0 3px #0d141c, 0 0 0 4px var(--line2),
+                   0 2px 5px rgba(0,0,0,.6)}
+  /* 会转的那一层。⚠️ 只是**空壳**, 面本身的受光不能跟着转 —— 转了就成"灯泡在转"了 */
+  /* ⚠️ pointer-events:none 是为了让**落点永远是 #dial 自己** —— 不然手指压在指针那根
+     竖条上时事件目标是 <i>, setPointerCapture 虽然照样能用, 但语义上别扭。 */
+  #dialKnob{position:absolute;left:0;top:0;width:100%;height:100%;
+            pointer-events:none;transition:transform .1s ease-out}
+  #dialKnob i{position:absolute;left:50%;top:6px;width:4px;height:14px;
+              margin-left:-2px;display:block;border-radius:2px;
+              background:linear-gradient(180deg,#eafcff,var(--acc) 55%,var(--acc2));
+              box-shadow:0 0 7px 1px rgba(79,201,240,.9)}
+  #dialVal{position:absolute;left:0;right:0;top:50%;margin-top:-8px;text-align:center;
+           font:600 12px/16px ui-monospace,Menlo,monospace;color:var(--acc);
+           pointer-events:none;text-shadow:0 0 8px rgba(79,201,240,.6)}
 
   /* ---- 中段: 对话记录(整行) + **嵌在对话框里面**的竖排两个立体图标钮 ---- */
   #midRow{flex:0 0 auto;position:relative;height:158px}
@@ -281,6 +316,9 @@
 <div id="preview">
   <video id="pv" playsinline muted autoplay></video>
   <div id="pvOff">点这里开摄像头</div>
+  <!-- 右边这一列(竖带): 摄像头摇杆在上, 地面速度圆盘在下。
+       画面本身靠左, 这条竖带就是把画面让出来的那块地方。 -->
+  <div id="rcol">
   <!-- 三档摇杆: 上=前置(自拍人像) 中=关(镜头划掉) 下=后置(镜头里的风景)。**没有文字**。 -->
   <div id="camRock">
     <div id="rockThumb"></div>
@@ -302,6 +340,12 @@
         <path d="M5.4 15.6 9 11.8l2.5 2.5 2.6-3.3 3.2 4.2"/></svg>
     </button>
   </div>
+  <!-- 3D 拨动圆盘: 拧它 = 改地面速度上限(10~50%)。#dialKnob 是指针那一层, 跟着值转。 -->
+  <div id="dial" aria-label="地面速度上限">
+    <div id="dialKnob"><i></i></div>
+    <div id="dialVal">12%</div>
+  </div>
+  </div><!-- /#rcol -->
 </div>
 
 <!-- 脸: 变形金刚那路数的角形眼(金属框 + 青辉 + 白色亮核) + 中间的急停大红按钮。
@@ -332,23 +376,11 @@
   </div>
 </div>
 
-<!-- 最下面: 速度上限圆盘 + 车辆状态 -->
-<div id="bottom">
-  <div id="dial" aria-label="地面速度上限">
-    <svg viewBox="0 0 64 64">
-      <!-- 270° 的底槽: 缺口留在正下方(从 135° 起画 270°, 转 135° 让它居下) -->
-      <circle class="track" cx="32" cy="32" r="26"
-              stroke-dasharray="122.52 163.36" transform="rotate(135 32 32)"/>
-      <circle class="arc" id="dialArc" cx="32" cy="32" r="26"
-              stroke-dasharray="0 163.36" transform="rotate(135 32 32)"/>
-    </svg>
-    <div id="dialVal">12%</div>
-  </div>
-  <div id="hud">·</div>
-</div>
-
+<!-- 车辆状态(蓝牙/听/模拟 + v w TTL)**折进「设置」里了**, 平时不占屏幕 ——
+     ⚠️ 只有急停钮和速度圆盘是不许藏的: 出事时手要去摸的东西必须在屏幕上。 -->
 <details>
   <summary>设置 / 自检</summary>
+  <div id="hud">·</div>
   <label class="chk"><input type="checkbox" id="sim" checked> 模拟模式（不发蓝牙，只打印帧）</label>
   <div>DeepSeek key（只存这台手机，不进源码/不进 git）</div>
   <input type="password" id="key" placeholder="sk-...">
@@ -370,7 +402,8 @@ const RX  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";   // 写(我们发指令)
 const TX  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";   // 通知(车回话, 本页只连不看)
 
 const CAR = {
-  max_v: 12, max_w: 12,            // 第二道闸: 速度上限 %。⚠️ 与 config.json car.max_v 对齐
+  /* 第二道闸: 速度上限 %。⚠️ 12 只是**开机默认值**, 圆盘能把它拧到 50(见 2.5 节) */
+  max_v: 12, max_w: 12,
   step_sec: 0.8, max_step_sec: 1.5,
   hold_sec: 6,  max_hold_sec: 10,  // max_hold_sec = **失联安全期**
   stop_words: ["停", "停下", "停止", "站住", "别动", "急停", "不许动", "停车"],
@@ -423,22 +456,33 @@ function draw() {
 
 /* ========================================================================
    2.5) 速度上限圆盘
-   ⚠️⚠️ **只能往下拧, 不能往上拧** —— DIAL_MAX 就是 CAR.max_v 的硬上限(12%), 也就是
-       config.json car.max_v / carbody.py --max-v / CarBLE 内部 ±20% 那道闸的对齐值。
-       往上放开 = 手机侧松了一道闸而车侧还卡着, 两边不一致比限速更危险。
+   ⚠️ 这里**不是**"只能往下拧"那一版了 —— 盘子现在能拧到 50%(见下面的风险说明)。
+      唯一没变的是: 拧出来的值就是**硬上限**, 闸②的钳位每帧都按它来。
    ======================================================================== */
-const DIAL_MIN = 4, DIAL_MAX = 12;
-const DIAL_C = 2 * Math.PI * 26;      // 圆的周长(viewBox 里的 r=26)
-const DIAL_SPAN = DIAL_C * 0.75;      // 270° 行程
+/* ⚠️⚠️ 10~50 是**用户 2026-09-21 亲自定的档**。上一版是 4~12 —— 也就是和 PC 那条链
+   (config.json car.max_v=12 / carbody.py --max-v / CarBLE 内部 ±20%)**逐字对齐**的。
+   抬到 50 之后这条"三方对齐"在本页**不再成立**, 是**故意**的:
+     · 本页是**无 PC** 那条链, 蓝牙直连车, PC 侧那几个限值根本不在回路上, 谈不上冲突;
+     · 真车到底认不认 50% 得**实车试**, 车固件自己还有一层限速, 认不到就只是"拧了没反应"。
+   ⇒ 风险落在这里: 这是**人骑在上面的自平衡车**, 50% 是原来 12% 的 4 倍还多。
+     第一次上 50 务必**先把车架起来(轮子离地)试**, 别骑着试。
+   ⇒ 下限也从 4 抬到 10 —— 从此**没有 4~9% 那种慢速蠕行**了, 场地小的时候会嫌快。 */
+const DIAL_MIN = 10, DIAL_MAX = 50;
+const DIAL_SWING = 135;               // 指针左右各能转 135° —— 270° 行程, 正下方那 90° 是死区
 
 /* 恢复上次拧到的位置。⚠️ 越界的一律**丢掉不要钳** —— localStorage 是用户能改的,
-   里面躺着 999 的话, "钳到 12" 还得多解释一句, 直接当没存过最省事也最安全。 */
+   里面躺着 999 的话, "钳到上限" 还得多解释一句, 直接当没存过最省事也最安全。
+   ⚠️ 改范围时这条**顺带就是迁移逻辑**: 上一版存下的 4~9 现在一律落在区间外被丢掉,
+      于是自动退回 CAR.max_v 默认值 —— 不会出现"旧存档把新下限顶穿"的情况。 */
 const savedMaxV = parseInt(localStorage.getItem("car_maxv") || "", 10);
 if (savedMaxV >= DIAL_MIN && savedMaxV <= DIAL_MAX) CAR.max_v = CAR.max_w = savedMaxV;
 
+/* 拧盘 = 把指针转到对应角度。最小 10% → -135°(指左下), 最大 50% → +135°(指右下)。
+   ⚠️ 转角是**从中心算**的: #dialKnob 铺满整颗盘, transform-origin 默认就是它的正中,
+      所以直接 rotate 就对, 不用写额外的 origin。 */
 function dialDraw() {
   const f = (CAR.max_v - DIAL_MIN) / (DIAL_MAX - DIAL_MIN);
-  $("dialArc").setAttribute("stroke-dasharray", (DIAL_SPAN * f).toFixed(2) + " " + DIAL_C.toFixed(2));
+  $("dialKnob").style.transform = "rotate(" + (-DIAL_SWING + 2 * DIAL_SWING * f).toFixed(1) + "deg)";
   $("dialVal").textContent = CAR.max_v + "%";
 }
 /* 从手指落点算角度: 正上方 = 0°, 顺时针为正。下半圆那 90° 是死区, 折到最近那一端。 */
