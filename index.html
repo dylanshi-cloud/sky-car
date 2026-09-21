@@ -1479,7 +1479,8 @@ const SYS = [
   "     后半段往回走; 左右也同理。**绝对不要一整段都朝同一个方向前进**。",
   "   · ⚠️⚠️ **幅度宁可小**: 速度/转向先按 10~25 编, 不要动辄 35。车里还有一道硬限速,",
   "     你编大了只会被削平, 动作反而不好看。",
-  "最后一行: 要说给用户听的话, 口语化一到两句, 总长不超过 40 字",
+  "最后一行: 要说给用户听的话, 口语化**一句**, 总长不超过 30 字",
+  "   · ⚠️ **说话期间车是听不见你的** —— 回话越长, 你要等越久才能说下一句。所以要短。",
   "   · 第1行是方向词或 编排 → 说一句简短确认, 例如「好嘞，往前走」/「好嘞，给你跳一段」",
   "   · 第1行是 无 → 直接回答用户",
   "⚠️ 车上是真人骑着, 认错动作会让人摔下去 —— 宁可不动, 不可乱动。",
@@ -1635,25 +1636,35 @@ function say(t) {
   const my = ++speakSeq;
   lastSaid = t;
   const tSay = performance.now();
+  /* ⚠️ **取走就用掉** —— 否则点麦克风按钮那句「在听」会借上一轮的时间戳报出个假数
+     (实测: 报成 7255ms, 看着像卡了 7 秒, 其实那只是上一轮和这一下之间的间隔)。 */
+  const tTurn = turnT0; turnT0 = 0;
   try {
     const u = new SpeechSynthesisUtterance(t);
-    u.lang = "zh-CN"; u.rate = 1.1;
-    speechSynthesis.cancel();      // ⚠️ 不 cancel 会排队积压, 说一句等三句
+    /* ⚠️ rate 1.1 → **1.2**: 说话这几十秒里**车是听不见你的**, 语速直接决定"要等多久才能说下一句"。
+       1.2 在 iOS 上仍然清楚, 再快就影响听感了。 */
+    u.lang = "zh-CN"; u.rate = 1.2;
+    /* ⚠️ 只在**真有东西在说/排队**时才 cancel。iOS 上 cancel+speak 连着调会让引擎拆了重建,
+       白等一截; 什么都没在说的时候 cancel 本来也是空操作, 省掉只会更快。 */
+    if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
     speaking = true;
     if (rec) { try { rec.abort(); } catch (e) {} }
     let done = false;
     /* ⚠️ 「开口等」= 从调 speak() 到**真出声**的延迟(iOS 上这是几百毫秒量级的一段,
         之前完全没量过)。「你说话→车开口」才是用户真感觉到的那个数。 */
     u.onstart = () => dbg("说: 开口等 " + (performance.now() - tSay).toFixed(0) + "ms"
-      + (turnT0 ? " · 你说话→车开口 " + (performance.now() - turnT0).toFixed(0) + "ms" : ""));
+      + (tTurn ? " · 你说话→车开口 " + (performance.now() - tTurn).toFixed(0) + "ms" : ""));
     const fin = () => {
       if (done || my !== speakSeq) return;      // 被后一句顶掉了 → 这算旧账, 不管
       done = true; speaking = false;
       const tFin = performance.now();
+      /* ⚠️ 350 → **150**: 实测这段就是**纯等**(`说完→重新在听 351ms` = 350 的 setTimeout + 1ms 的
+         rec.start)。留 150ms 是给扬声器把余音放干净 —— 再短, 我们自己那句话的尾巴会被当成
+         用户输入(即便被 echoLike 拦住, 也白白废掉一轮)。 */
       if (listening) setTimeout(() => {
         if (listening && !speaking) { try { rec.start(); } catch (e) {} }
         dbg("说完→重新在听 " + (performance.now() - tFin).toFixed(0) + "ms");
-      }, 350);
+      }, 150);
     };
     u.onend = fin; u.onerror = fin;
     speechSynthesis.speak(u);
@@ -1687,7 +1698,7 @@ function startMic() {
     };
     /* ⚠️ iOS 上识别会因为静音自己结束 —— 只要还开着听, 就重起。
        ⚠️ 但**正在说话时不许重起**(那是我们自己 abort 的, 说完由 say() 的 fin 续上), 否则立刻把回话录进去。 */
-    rec.onend = () => { if (listening && !speaking) setTimeout(() => { if (listening && !speaking) { try { rec.start(); } catch (e) {} } }, 250); };
+    rec.onend = () => { if (listening && !speaking) setTimeout(() => { if (listening && !speaking) { try { rec.start(); } catch (e) {} } }, 120); };
     /* ⚠️ "no-speech" 这类每小时能刷几十条, 全进 dbg; 只有真的没权限才在对话框里说一声 */
     rec.onerror = (e) => {
       dbg("识别错误: " + e.error);
