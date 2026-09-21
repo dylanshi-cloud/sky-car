@@ -74,9 +74,27 @@
   /* ⚠️ 显式 border-box。默认的 content-box 会让 height:104px 实际渲染成 122px
      (padding+border 加上去) —— face.html 的嘴巴"老挡住眼睛"就是这个坑, 别再来一次。 */
   *,*::before,*::after{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);
-            font:15px/1.6 -apple-system,"PingFang SC",system-ui,sans-serif;
-            -webkit-user-select:none;user-select:none;overscroll-behavior:none}
+  /* ⚠️⚠️ 底色**只挂在 html 上, body 必须透明** —— 字符瀑布那层 canvas 是
+     `position:fixed; z-index:-1`, 它落在 root 层叠上下文的"负 z-index"那一层:
+     **在 html 底色之上、在 body 的块背景之下**。body 一旦有底色就把整层瀑布糊掉了
+     (改回 `html,body{background:var(--bg)}` = 瀑布白写, 画面上一个字都看不见)。 */
+  html{margin:0;height:100%;background:var(--bg)}
+  body{margin:0;height:100%;background:transparent;color:var(--tx);
+       font:15px/1.6 -apple-system,"PingFang SC",system-ui,sans-serif;
+       -webkit-user-select:none;user-select:none;overscroll-behavior:none}
+  /* ---- 背景: 竖向奔腾而下的抽象字符瀑布(canvas, 逻辑在脚本最后一节) ----
+     z-index:-1 ⇒ 只出现在"没被面板/按钮/眼睛盖住的空白"里, 正是用户要的位置;
+     ⚠️ pointer-events:none 不能漏 —— 它铺满整屏, 不关掉会把整页的点击/拖动全吃掉。 */
+  #rain{position:fixed;left:0;top:0;width:100%;height:100%;display:block;
+        z-index:-1;pointer-events:none}
+  /* 纵深氛围层: 四周压暗、中间留亮 ⇒ 画面像是往屏幕里凹进去。
+     ⚠️⚠️ 必须挂在 `body::after` 而**不能是 ::before**: 同一层(z-index:-1)里按**树序**绘制,
+        ::before 是 body 的第一个子节点、#rain 紧随其后 ⇒ ::before 会被 #rain 盖住(等于没画);
+        ::after 排在最后, 才稳定地压在雨点之上。 */
+  body::after{content:"";position:fixed;left:0;top:0;width:100%;height:100%;
+              z-index:-1;pointer-events:none;
+              background:radial-gradient(125% 85% at 50% 44%,
+                         rgba(0,0,0,0) 34%, rgba(3,6,10,.62) 100%)}
   /* 竖排 flex: 取景器吃掉所有余量, 其余按内容高度排。
      ⚠️ 别用 vh 硬算高度 —— 手机架在车上时地址栏收放会让 vh 变。 */
   body{display:flex;flex-direction:column;gap:8px;box-sizing:border-box;padding:8px;
@@ -105,10 +123,31 @@
         照样吃 gap —— 漏算这 24px 就是"明明算够了却还是被切"。
      ⚠️ 宁可让页面往下滚, 也不许把急停钮切掉半个; 「设置」展开时同理(不必再写额外的
         `body:has(details[open])` 兜底了 —— 这条下限已经把那种情形一起管住)。 */
-  #preview{position:relative;flex:1 1 auto;min-height:284px;max-height:360px;background:#000;
-           border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  #preview video{position:absolute;left:0;top:0;width:70%;height:100%;
-                 object-fit:contain;display:block;background:#000}
+  /* ---- 倒角(45° 切角), 不是圆角 ----
+     ⚠️⚠️ `clip-path` **会连子元素一起裁**。所以只给外框切角是不够的: 外框切出斜边之后,
+        里面那层方的子元素在同一处被**同一条斜线**切掉 ⇒ 斜边上永远露不出那一圈描边,
+        看着就是"边框在四个角断开了"。
+        解法 = **两层同形斜边**: 外层(background 当边框色)切 **14px**, 内容层缩进 1px 再切 **13px**
+        ⇒ 两条斜线平行、处处相距 1px, 描边才绕得过去。
+     ⚠️ 14 / 13 是一对, 必须一起改: 内层切角 = 外层 − 缩进量(这里缩进 1px)。
+     ⚠️ 切掉的那四个角是**真的没了**(不是变透明) —— 透出来的是它后面的东西:
+        这里是 body(透明) ⇒ 直接看到字符瀑布流过去, 白送一点纵深。 */
+  #preview{position:relative;flex:1 1 auto;min-height:284px;max-height:360px;
+           background:var(--line);
+           clip-path:polygon(0 14px,14px 0,calc(100% - 14px) 0,100% 14px,
+                             100% calc(100% - 14px),calc(100% - 14px) 100%,
+                             14px 100%,0 calc(100% - 14px));
+           overflow:hidden}
+  /* 取景器内容层: 四周缩进 1px 当"内框", 自带 13px 切角(见上)。
+     视频 / #pvOff / #rcol 现在都挂在这一层里 ⇒ 它们的定位基准从 #preview 变成 #pvIn
+     (整体差 1px, 四个角本来就留了 30px 以上余量, 不影响任何控件的可点性)。 */
+  #pvIn{position:absolute;left:1px;top:1px;right:1px;bottom:1px;background:#000;
+        overflow:hidden;
+        clip-path:polygon(0 13px,13px 0,calc(100% - 13px) 0,100% 13px,
+                          100% calc(100% - 13px),calc(100% - 13px) 100%,
+                          13px 100%,0 calc(100% - 13px))}
+  #pvIn video{position:absolute;left:0;top:0;width:70%;height:100%;
+              object-fit:contain;display:block;background:#000}
   #pvOff{position:absolute;left:0;top:0;width:70%;bottom:0;display:flex;align-items:center;
          justify-content:center;text-align:center;padding:14px;background:var(--panel);
          color:var(--acc);font-size:13.5px}
@@ -399,11 +438,31 @@
   /* ⚠️ flex-grow:1 —— 取景器封顶后腾出来的余量全归它(不这么写页面底部会空一块)。
      高度 158 仍是它的**基准**; 视口矮的时候按 158 排, 高的时候才长。 */
   #midRow{flex:1 1 auto;position:relative;height:158px;min-height:158px}
+  /* 对话窗口 = **一张深邃的嘴**: 外面那圈倒角是"唇", 里面是一路凹进去的腔体。
+     `#mouth` 只干两件事 —— 切角(唇线) + 用背景色当那 1px 描边; 内缩 1px 留给 #tr 当内框。
+     切角同样是 14 / 13 那一对(见 #preview 上面那段, 原理一样)。 */
+  #mouth{height:100%;padding:1px;background:var(--line);
+         clip-path:polygon(0 14px,14px 0,calc(100% - 14px) 0,100% 14px,
+                           100% calc(100% - 14px),calc(100% - 14px) 100%,
+                           14px 100%,0 calc(100% - 14px))}
   /* ⚠️ 高度写死、不随内容长 —— 否则一说起话来它就把上面的取景器越挤越小(实测 342→280px)
-     ⚠️ 右边 padding 48px 是留给那两个钮的 —— 不加的话字会钻到按钮底下。 */
-  #tr{height:100%;white-space:pre-wrap;word-break:break-word;
-      border:1px solid var(--line);border-radius:12px;padding:8px 48px 8px 12px;
-      background:var(--panel);overflow-y:auto;font-size:13px}
+     ⚠️ 右边 padding 48px 是留给那两个钮的 —— 不加的话字会钻到按钮底下。
+     ⚠️⚠️ 上内边距 8 → **30**: 摇杆底盘会从上面探进来 **23px**(见 #stick 那段), 文字不从它
+        下面起的话, 第一行中段就**永远被那颗蛋压着**(改版式前实测过)。 */
+  #tr{height:100%;white-space:pre-wrap;word-break:break-word;font-size:13px;
+      padding:30px 48px 12px 12px;overflow-y:auto;
+      clip-path:polygon(0 13px,13px 0,calc(100% - 13px) 0,100% 13px,
+                        100% calc(100% - 13px),calc(100% - 13px) 100%,
+                        13px 100%,0 calc(100% - 13px));
+      /* 深邃感 = 三层叠出来的: 顶上那道很深的**喉影**(上唇投下来的)、
+         喉底一点冷色**反光**(不是死黑)、中间自然过渡。
+         ⚠️ 纯色 #0d141c 那种"一块平底"是凹不进去的, 必须有明暗差。 */
+      background:
+        radial-gradient(130% 72% at 50% -16%, rgba(79,201,240,.11) 0%, rgba(0,0,0,0) 58%),
+        linear-gradient(180deg,#03070b 0%,#061019 46%,#0a1b27 100%);
+      /* 内阴影: 上缘一道又深又长的暗(喉口), 下缘一道冷色微光(喉底反光) */
+      box-shadow:inset 0 30px 34px -20px rgba(0,0,0,.98),
+                 inset 0 -16px 26px -18px rgba(79,201,240,.16)}
   #tr .u{color:var(--acc)} #tr .c{color:var(--tx)} #tr .s{color:var(--ok)} #tr .e{color:var(--bad)}
 
   /* ⚠️ 挂在 #midRow 上(absolute)而不是当 flex 兄弟 —— 这样它**压在对话面板的右边框里侧**,
@@ -442,9 +501,17 @@
 </head>
 <body>
 
+<!-- 背景: 竖向奔腾而下的抽象字符瀑布。⚠️ 必须是 body 的第一个子节点 ——
+     body::after(那层纵深压暗)靠**树序**压在它上面(同为 z-index:-1), 见 CSS。 -->
+<canvas id="rain" aria-hidden="true"></canvas>
+
 <h1>Sky 车 · 无 PC 版</h1>
 
+<!-- 取景器。⚠️ 四个角是**倒角(45° 切角)**不是圆角, 靠 clip-path 实现 ——
+     外层 #preview 只负责那圈描边, 内容整体缩进 1px 装进 #pvIn(自带内切角)。
+     两层斜边必须平行(14 / 13), 否则描边在四个角会断。详见 CSS 里那段长注释。 -->
 <div id="preview">
+ <div id="pvIn">
   <video id="pv" playsinline muted autoplay></video>
   <div id="pvOff">点这里开摄像头</div>
   <!-- 右边这一列(竖带): 摄像头摇杆在上, 地面速度圆盘在下。
@@ -481,7 +548,8 @@
           @media (max-height:640px) 那段兜底(矮视口把整列一起缩小, 保证它不被切掉)。 -->
   <button id="estop" aria-label="急停"></button>
   </div><!-- /#rcol -->
-</div>
+ </div><!-- /#pvIn -->
+</div><!-- /#preview -->
 
 <!-- 脸: 变形金刚那路数的角形眼(金属框 + 青辉 + 白色亮核) + **两眼正中那根摇杆(鼻子)**。
      ⚠️ 急停钮已经挪走了(用户要求挂在速度圆盘下面), 现在在取景器右边那一列里。 -->
@@ -494,7 +562,9 @@
 
 <!-- 对话记录(左, 往上提) + 两个立体图标钮(右, 无文字) -->
 <div id="midRow">
-  <div id="tr"></div>
+  <!-- 对话窗口 = 一张深邃的嘴。⚠️ #mouth 只是"唇"(切角 + 1px 描边),
+      真正的滚动/文字在里面的 #tr —— JS 仍然只认 #tr, 多包一层不影响任何一处调用。 -->
+  <div id="mouth"><div id="tr"></div></div>
   <div id="acts">
     <button id="bCar" aria-label="连车">
       <!-- 蓝牙符文 = "连" -->
@@ -1307,6 +1377,133 @@ hud.ble = false; hud.mic = false; hud.v = hud.w = 0; hud.ttl = 0;
   if (window.history && history.replaceState)
     history.replaceState(null, "", location.pathname + location.search);
   tr("✓ 已从网址读入 DeepSeek key, 存在本机 (地址栏已抹掉)", "s");
+})();
+
+/* ========================================================================
+   背景: 竖向奔腾而下的抽象字符瀑布(canvas #rain)
+   ------------------------------------------------------------------------
+   纵深靠四样一起拉开, 缺一样都会退化成"一堵平墙":
+     远 = 小 / 暗 / 慢 / 密     近 = 大 / 亮 / 快 / 疏
+   再叠上 CSS 那层 body::after 的径向压暗(四周暗、中间亮), 才有"往里凹"的感觉。
+   ⚠️ 头字符点亮、尾巴**不存历史**, 靠"每帧盖一层半透明底色"自然拖出来(经典雨点做法)
+      —— 存历史数组在手机上很快就是内存/GC 的坑。
+   ⚠️ 节流 ~22fps + 页面一进后台就停: 这页要挂在车上跑一整天, 满帧动画纯烧电。
+   ======================================================================== */
+(function rainBG(){
+  const cv = $("rain");
+  if (!cv || !cv.getContext) return;
+  const ctx = cv.getContext("2d");
+  if (!ctx) return;
+
+  /* 抽象字符池 —— **数字和特殊符号为主**, 汉字只当点缀(用户: "夹杂数字和特殊字符")。
+     ⚠️ 权重是靠**重复出现**做的: 出现 3 次 = 抽中概率是出现 1 次的 3 倍。
+        直接按字符数量堆汉字是不行的 —— 汉字笔画多, 字号一小就糊成一团墨点,
+        而且一眼看上去全是"字"而不是"数据流"。 */
+  const GLYPHS = (
+      "0123456789".repeat(3) +                          // 数字: 权重最高
+      "+-*/=<>[]{}()|\\_.,:;!?@#$%^&*~\"'".repeat(2) +  // 特殊符号: 次之
+      "0123456789ABCDEF" +                              // 十六进制
+      "天地玄黄宇宙洪荒日月盈昃辰宿列张信息熵流"          // 汉字: 少量提味
+  ).split("");
+  const gp  = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const FONT = 'ui-monospace,Menlo,monospace';
+
+  /* fs=字号 / col=列宽 / alpha=整体浓度 / spd=[最慢,最快] 每帧下落的像素 / head=头字符色。
+     ⚠️ 三层的 fs/alpha/spd/列宽**要成比例地拉开**, 差得太小就看不出层次。
+     ⚠️ 2026-09-21 用户「字符密集一些, 字体小一半」: 字号 11/15/21 → **6/8/11**(≈ 一半),
+        列宽同步收到**约 1.3 倍字号**(8/10/14) ⇒ 每层 49/39/28 列, 三层合计 **≈116 列**
+        (改之前只有 28/20/14 ≈ 62 列, 密度翻倍)。
+     ⚠️⚠️ **字号减半必须把 spd 一起提上去**, 不能只改 fs: 雨点的"流速感"是按
+        **每秒走过几个字身**算的 —— 字身小了一半而 px/frame 不动, 看着反而快一倍;
+        而且拖尾长度 = spd/FADE(像素), 字变小后同样像素数的尾巴"字数"也翻倍。
+        这里 spd 取了原来的 ~4 倍, 配合 FADE 调小, 才拿回"奔腾成串"的样子。 */
+  const LAYERS = [
+    { fs:6,  col:8,  alpha:.20, spd:[1.1, 2.4], head:"rgba(120,190,225,.40)" },
+    { fs:8,  col:10, alpha:.32, spd:[1.7, 3.4], head:"rgba(150,225,255,.64)" },
+    { fs:11, col:14, alpha:.55, spd:[2.3, 4.6], head:"rgba(215,245,255,.96)" },
+  ];
+
+  let W = 0, H = 0, cols = [];
+
+  /* 掉到底就从顶上重来。⚠️ 重生点带**随机负偏移**, 各列才不会排着队一起冒头。 */
+  function seed(c){
+    const L = LAYERS[c.L];
+    c.y = rnd(-H * 0.9, -4);
+    c.s = rnd(L.spd[0], L.spd[1]);
+  }
+  function build(){
+    /* ⚠️ DPR 封顶 2: iPhone 是 3, 铺满全屏的 canvas 按 3 倍画纯属浪费带宽/显存,
+       而且每帧要 fillRect 整个画布, 面积是按 dpr² 涨的。 */
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.clientWidth  || window.innerWidth;
+    H = cv.clientHeight || window.innerHeight;
+    cv.width  = Math.max(1, Math.round(W * dpr));
+    cv.height = Math.max(1, Math.round(H * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cols = [];
+    LAYERS.forEach((L, li) => {
+      const n = Math.ceil(W / L.col) + 1;
+      for (let i = 0; i < n; i++){
+        const c = { L: li, x: i * L.col + rnd(0, L.col * .55) };
+        seed(c);
+        /* 开局把 y 打散到**整屏**, 否则第一秒是"所有列从顶上一起冲下来", 一眼假。 */
+        c.y = rnd(-H, H);
+        cols.push(c);
+      }
+    });
+    ctx.fillStyle = "#070a0f";            // 与 html 的 --bg 同色
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  /* 每帧盖的底透明度。⚠️ **拖尾长度 = spd / FADE 像素**(不是帧数!) —— 它和 spd 是一对,
+     改一个字要一起看: FADE 调小 = 尾巴更长更"流"; 太小则整屏越积越亮、旧字擦不干净。 */
+  const FADE = .075;
+  const STEP = 1000 / 22;                 // 目标 ~22fps
+  let raf = 0, last = 0, running = false;
+
+  function draw(){
+    ctx.fillStyle = "rgba(7,10,15," + FADE + ")";
+    ctx.fillRect(0, 0, W, H);
+    for (const c of cols){
+      const L = LAYERS[c.L];
+      ctx.font = L.fs + "px " + FONT;
+      ctx.globalAlpha = L.alpha;
+      ctx.fillStyle = L.head;
+      ctx.fillText(gp(), c.x, c.y);
+      c.y += c.s;
+      if (c.y > H + L.fs * 2) seed(c);
+    }
+    ctx.globalAlpha = 1;
+  }
+  function frame(t){
+    if (!running) return;
+    raf = requestAnimationFrame(frame);
+    if (t - last < STEP) return;          // 节流(不是每帧都画)
+    last = t;
+    draw();
+  }
+  function start(){ if (running) return; running = true; last = 0;
+                    raf = requestAnimationFrame(frame); }
+  function stop(){ running = false; if (raf) cancelAnimationFrame(raf); raf = 0; }
+
+  build();
+  /* ⚠️ 系统开了"减弱动态效果"就只画一帧静态的 —— 背景还在, 只是不动。
+     (这一页在车上长期开着, 尊重这个开关同时也是省电。) */
+  if (window.matchMedia && matchMedia("(prefers-reduced-motion:reduce)").matches){
+    for (let i = 0; i < 26; i++) draw();
+  } else {
+    start();
+    document.addEventListener("visibilitychange",
+      () => { document.hidden ? stop() : start(); });
+  }
+
+  /* ⚠️ iOS 上地址栏收放 / 转屏都会触发 resize, 而 build() 会把所有列重建一遍 ——
+     不防抖的话拖一下地址栏就整屏重置一次, 看着像闪屏。 */
+  let rt = 0;
+  const reflow = () => { clearTimeout(rt); rt = setTimeout(build, 180); };
+  window.addEventListener("resize", reflow);
+  window.addEventListener("orientationchange", reflow);
 })();
 
 dialDraw();                     // 把圆盘画成当前上限(含上面刚恢复的 localStorage 值)
