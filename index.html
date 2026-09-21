@@ -769,23 +769,29 @@ let dev = null, rxChar = null, writing = false, writingAt = 0;
 /* 写卡住多久算"卡死"(见 writeDrive 里那段)。⚠️ 必须 **< 车那边的失联安全期**:
    超过 ~1s 没有帧, 车就会自己停/踢我们 —— 卡住的锁必须先于它松开才有意义。 */
 const WRITE_STALL_MS = 1200;
-/* ⚠️⚠️ 写特征值的两种模式(2026-09-21 真机两轮核实):
-     · `carbody.py` → `ai_car.py` 的 `CarBLE.write_drive()` 用的是 `response=True`(等车确认);
-     · 本页用 `writeValueWithoutResponse`(不等确认)。
-   PC 侧曾以为这是"能跑通的 PC 路径 vs 掉线的 iOS 路径"的唯一差异, 但真机第二轮否掉了:
-   改成带回应之后**连接反而稳住了**(说明带回应那条在 iOS 上根本没把帧发出去 ——
-   没帧就进不了远程模式, 也就不会被远程模式的 1s 看门狗踢),
-   于是车"连上了却一动不动"。⇒ 见下面那段, **默认回到 noack**。 */
-/* ⚠️⚠️ 2026-09-21 真机第二轮: 上一版"优先带回应(ack)"在手机上**连接保住了但车一动不动**。
-   能推出的事实: ①车没被踢 ⇒ 有帧在流(否则远程模式 1s 看门狗会踢) ②车不动 ⇒ 帧车不认。
-   最可疑的是 **beacio 的 `writeValue`(带回应) 在 iOS 上"静默 resolve 但没真发"** ——
-   它不抛 `NotSupportedError`, 所以上一版的降级分支**永远走不到**, 于是全页都在用一条不工作的写法。
-   ⇒ **默认改回 `noack`**(这是之前真机观察到"帧确实到达了车"的那条写法),
-     带回应改成**网址显式指定** `?ack=1` 才用(留着以后在别处复验)。
-   ⚠️ `txN`(真发出去的帧数)与 `txErr`(失败数)现在**直接显示在「车辆状态」里** ——
-     "连上了但车不动"时先看这两个数: 帧数不涨=没发出去, 涨了=发了车不认, 两种病治法完全不同。 */
-const FORCE_ACK = /[?&]ack=1/.test(location.search);
-let writeMode = FORCE_ACK ? "ack" : "noack";   // "ack"=等确认 / "noack"=不等
+/* ⚠️⚠️⚠️ 写模式: **默认带回应(ack)** —— 2026-09-21 深夜(九) iPhone 真机实测定案。
+   写特征值有两种写法, 差别只在"要不要等车确认":
+     · `ack`   = `writeValue()`              等到车回确认, 一次最多一个在飞
+     · `noack` = `writeValueWithoutResponse()` 塞进写队列就走, 不等
+   **只有 `carbody.py`(PC 直连车, 跑了几十次没掉过)用的是 `ack`**;
+   本页默认曾长期是 `noack`, 于是 iPhone 上出现「**一直断开一直重连**」(摇杆/语音/编排都能用, 就是链不停断)。
+   实测: iPhone 上换成 `?ack=1` ⇒ 用户原话「**不掉线了。一切都正常可以互动**」。
+   机制: `noack` 是"塞队列就走", 12.5Hz 灌下去 —— **Windows 的蓝牙栈吃得下, iOS 的 CoreBluetooth 写队列小**
+   ⇒ 队列打满就断链。**不是车的脾气, 是主机侧队列深度**。
+
+   ⛔ 旧的错误结论(留档, 别再翻回去): "ack 在 iOS 上会**静默 resolve 但没真发**, 所以车连上却不动"。
+   那条推断**是错的** —— 当时"车一动不动"的**真凶是帧标度错 327.67 倍**(见 §3.3, `driveCmd` 把百分比
+   当原始值填, 12% 填成 `0x000C` = 几乎为零), 与写模式**毫无关系**。标度修好之后那个"证据"就不成立了,
+   而"改 ack ⇒ 车不动"这个巧合把 ack 误判成了坏写法, 白白把默认退回 `noack`, 一路带到 iPhone 上变成掉线。
+
+   ⇒ 默认 `ack`; **`?ack=0` 打回 `noack`**(排查用)。
+   ⚠️ 不是所有特征都支持带回应写 —— 不支持会抛 `NotSupportedError`, 下面会自动退回 `noack` 并说一声。
+   ⚠️ `txN`(真发出去的帧数)/`txErr`(失败数)在「车辆状态」里直接看得见:
+     "连上了但车不动"时先看这两个数 —— 帧数不涨=没发出去, 涨了=发了车不认, 两种病治法完全不同。 */
+const ACK_PARAM = (location.search.match(/[?&]ack=(\d)/) || [])[1];
+const RESET_WRITE_MODE = () => (ACK_PARAM === "0" ? "noack" : "ack");
+let writeMode = RESET_WRITE_MODE();    // "ack"=等确认 / "noack"=不等
+let noackTold = false;                 // "不支持带回应"那句只说一次
 let noCarHinted = false;               // "还没连车"那句只提示一次
 let txN = 0, txErr = 0;                // 真发出去的帧数 / 写失败次数
 function bleWrite(u8) {
@@ -795,7 +801,10 @@ function bleWrite(u8) {
     (e) => {
       if (e && e.name === "NotSupportedError") {      // 这个特征不支持带回应写
         writeMode = "noack";
-        tr("蓝牙: 这车不支持带回应写, 已退回不带回应", "dim");
+        if (!noackTold) {           // ⚠️ 别每次重连都再说一遍(重连会重置 writeMode)
+          noackTold = true;
+          tr("蓝牙: 这车不支持带回应写, 已退回不带回应", "dim");
+        }
         return rxChar.writeValueWithoutResponse(u8);
       }
       throw e;
@@ -871,7 +880,7 @@ async function connectCar() {
       optionalServices: [NUS],
     });
     lastDev = dev;                       // 记住它, 断了靠它自愈
-    writeMode = FORCE_ACK ? "ack" : "noack";
+    writeMode = RESET_WRITE_MODE();
     txN = 0; txErr = 0;
     if (reconTimer) { clearTimeout(reconTimer); reconTimer = null; reconN = 0; }
     dev.addEventListener("gattserverdisconnected", () => carDrop("车/系统断开"));
@@ -884,8 +893,8 @@ async function connectCar() {
     lastDropWhy = "";                    // 链路活了 ⇒ 下次再断是**新信息**, 要重新报
     hud.ble = true; $("bCar").classList.add("on"); draw();
     tr("✓ 已连车 " + (dev.name || dev.id) + " , 已发进遥控模式", "s");
-    tr("蓝牙写法: " + (writeMode === "ack" ? "带回应" : "不带回应") +
-       (FORCE_ACK ? " (网址 ?ack=1 指定)" : ""), "dim");
+    tr("蓝牙写法: " + (writeMode === "ack" ? "带回应" : "不带回应")
+       + (ACK_PARAM === "0" ? " (网址 ?ack=0 指定)" : ""), "dim");
     /* ⚠️ 连上 3s 后把**帧计数**直接报到对话记录里。
        这是"连上了但推摇杆车不动"唯一的判据(帧数不涨=没发出去 / 涨了=发了车不认, 两种病治法完全不同),
        而「车辆状态」折在「设置」里, 用户根本翻不到。它属于「按钮互动的结果」, 不是后台信息。 */
@@ -920,7 +929,7 @@ function reconStep() {
       const svc = await srv.getPrimaryService(NUS);
       const ch  = await svc.getCharacteristic(RX);
       dev = lastDev; rxChar = ch;
-      writeMode = FORCE_ACK ? "ack" : "noack";
+      writeMode = RESET_WRITE_MODE();
       writing = false;                     // 新链路 = 新的写锁, 别让旧的一直卡着
       await bleWrite(enterRemote());
       /* ⚠️ 进遥控模式后**立刻补一帧停车** —— 断开到重连这段里命令已经在 carDrop 里清成 0,
