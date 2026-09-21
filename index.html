@@ -1682,9 +1682,14 @@ let deepPollT = null;
 /* ⚠️ 名字是 **Sky**(2026-09-21 用户改的), 但 "claude" 那串**留着** —— 用户/语音识别
    都可能还按老叫法来, 删了就成了"喊了没反应"。 */
 const DEEP_NAMES = ["sky", "斯凯", "claude", "克劳德", "克劳得", "克劳", "cloud", "小克"];
+/* ⚠️⚠️ 这张表**只放"真的要去电脑上做事"的词**, 不放过日子的口语 —— 命中一次就是
+   好几秒的等待, 用户 2026-09-21 抱怨的「每次对话都变成"我去问问电脑"」, 一部分就是
+   这张表太宽造成的。2026-09-21 收紧: 删掉 **"查" / "装" / "以前"** 三个过宽的
+   (「检查」「装作」「以前我住那儿」这种日常话都会被它们整句拖进深档),
+   需要"查"的场合一般会带上"帮我"或说成"查一下", 那两条还在表里。 */
 const DEEP_KEYS = [
-  "电脑", "文件", "代码", "脚本", "程序", "网页", "上网", "查", "链接", "下载", "安装", "装",
-  "运行", "跑一下", "邮件", "日程", "日历", "记住", "记一下", "记下来", "上次", "以前", "记得",
+  "电脑", "文件", "代码", "脚本", "程序", "网页", "上网", "查一下", "链接", "下载", "安装",
+  "运行", "跑一下", "邮件", "日程", "日历", "记住", "记一下", "记下来", "上次", "记得",
   "帮我写", "帮我改", "帮我做", "表格", "excel", "文档", "报告", "项目", "服务器", "路由器",
   "硬盘", "备份",
 ];
@@ -1722,9 +1727,46 @@ async function deepPing(quiet) {
 }
 setInterval(() => { if (deepCfg()) deepPing(true); }, 60000);
 
-const DEEP_FILLER = ["让我想想…", "我去问问电脑…", "稍等，我查一下…", "这就去办…"];
+/* ⚠️ 垫场词要**短**。深档一轮 4~30s, 这句的作用只是"别让空气安静", 长了反而
+   把"要等很久"这件事说得更明显 —— 用户 2026-09-21 的原话就是抱怨
+   「每次对话变成"我去问问电脑"，好久没回复」, 那句正是从这里出去的, 已删。
+   ⚠️ 真正治"好久没回复"的是下面的 deepLive(): 电脑**一边写我们一边显示**,
+   一般 3 秒上下就出字, 用户不必干等。 */
+const DEEP_FILLER = ["嗯，稍等…", "让我想想…", "好，我看看…"];
 let deepFillI = 0;
 let pendingSay = "";
+
+/* ---- 深档"正在写"的实时行 ----
+   ⚠️ 这一条是**观感**上的大头, 不是功能: 桥的 `/job` 在 `running` 时**就已经在吐
+      `text`** 了(--include-partial-messages 抽出来的增量), 页面原来一路丢到结束后才显示
+      ⇒ 用户看到的就是"说完垫场词, 然后十几秒一片空白"。
+   ⚠️ 用**独占一行**原地更新, 不往 #tr 里追加 —— 否则每个轮询周期都刷一行出来。
+   ⚠️ 完成后必须 deepLiveClear(), 否则最终那句会跟这行并存。 */
+let deepLiveEl = null;
+function deepLive(t) {
+  if (!deepLiveEl || !deepLiveEl.parentNode) {      // 被 300 行上限挤掉了就重建
+    deepLiveEl = document.createElement("div");
+    deepLiveEl.className = "dim";
+    trEl.appendChild(deepLiveEl);
+  }
+  deepLiveEl.textContent = t;
+  while (trEl.childNodes.length > 300) trEl.removeChild(trEl.firstChild);
+  trEl.scrollTop = trEl.scrollHeight;
+}
+function deepLiveClear() {
+  if (deepLiveEl && deepLiveEl.parentNode) deepLiveEl.parentNode.removeChild(deepLiveEl);
+  deepLiveEl = null;
+}
+/* ⚠️ 实时行显示的是**没加工过的中间产物**, 里面带着 `<说>…</说>` 契约标签、甚至
+   写到一半的 `<走>` 步表 —— 直接把原文贴上去, 屏幕上就是一堆尖括号
+   (实测第一版就是这样: `🧠 在想 1.6s · <说>你好，我是 Sky…</说>`)。
+   这里把契约标签摘掉、步表块整块砍掉, 只留说话的内容。 */
+function liveSnip(s) {
+  let t = String(s || "");
+  t = t.replace(/[<＜]\s*走\s*[>＞][\s\S]*$/i, " ");         // 步表块(含没写完的)整块不要
+  t = t.replace(/[<＜]\s*\/?\s*(说|走)\s*[>＞]/gi, " ");    // 契约标签本身
+  return t.replace(/\s+/g, " ").trim();
+}
 /* ⚠️ 深档回来时**我们可能正在说话**(垫场那句还没念完) —— 直接 say() 会把前一句掐掉, 两句都听不全。
    排进待播, 由 say() 的 fin() 说完之后冲掉(见 say 里那一句)。 */
 function deepSay(t) {
@@ -1742,6 +1784,7 @@ function deepTurn(text) {
     tr("电脑联系不上，我先陪你聊", "warn");
     askBrain(text); return;
   }
+  deepLiveClear();                     // 上一轮的实时行(如果还在)先清掉
   tr("🧠 转深度大脑…", "dim");
   /* ⚠️ 先说一句垫着, 但**不等结果** —— 说完麦克风就回到待听, 这十几秒里用户照样能
      「往前走」「停」(那些走本地, 0 延时)。 */
@@ -1783,8 +1826,10 @@ async function deepAsk(text) {
 function deepPoll(jid, myEpoch, t0) {
   if (jid !== deepJobId) return;                 // 已被新任务顶掉, 这一串就到此为止
   const dt = performance.now() - t0;
-  if (dt > deepTurnMax * 1000) { tr("✗ 深档超时（" + Math.round(dt / 1000) + "s）", "e"); return; }
+  if (dt > deepTurnMax * 1000) { deepLiveClear(); tr("✗ 深档超时（" + Math.round(dt / 1000) + "s）", "e"); return; }
   clearTimeout(deepPollT);
+  /* ⚠️ 前 30 秒每 800ms 问一次(原来是 1500ms) —— 那 1.5s 是**白加在用户头上的延迟**,
+     第一段字本来 3 秒就到了, 却可能被轮询节奏压到 4.5 秒才露头。 */
   deepPollT = setTimeout(async () => {
     if (jid !== deepJobId) return;
     let j = null;
@@ -1794,13 +1839,21 @@ function deepPoll(jid, myEpoch, t0) {
                             { headers: { "Authorization": "Bearer " + c.tok }, cache: "no-store" });
       j = await r.json();
     } catch (e) { dbg("深档 /job 出错: " + e.name); deepPoll(jid, myEpoch, t0); return; }
-    if (!j || j.state === "queued" || j.state === "running") { deepPoll(jid, myEpoch, t0); return; }
+    if (!j || j.state === "queued" || j.state === "running") {
+      /* 实时行: 秒数 + 已经写出来的那几个字(取尾部 60 字, 因为长回答前面会被滚掉)。 */
+      const secs = (performance.now() - t0) / 1000;
+      const part = liveSnip((j && j.text) || "");
+      deepLive("🧠 " + (!j || j.state === "queued" ? "排队中" : "在想") + " " + secs.toFixed(1) + "s"
+               + (part ? " · " + part.slice(-60) : ""));
+      deepPoll(jid, myEpoch, t0); return;
+    }
     deepDone(jid, myEpoch, j, t0);
-  }, dt > 30000 ? 3000 : 1500);
+  }, dt > 30000 ? 3000 : 800);
 }
 
 function deepDone(jid, myEpoch, j, t0) {
   if (jid !== deepJobId) return;
+  deepLiveClear();                 // ⚠️ 必须**先撤掉实时行**, 否则它跟下面那句并存
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
   dbg("深档完成 " + j.state + " " + secs + "s · 工具 " + ((j.tools || []).join(",") || "无"));
   if (j.state !== "done") {
@@ -2021,9 +2074,11 @@ $("bDeep").addEventListener("click", () => {
   deepMode = !deepMode;
   try { localStorage.setItem("car_deep", deepMode ? "1" : "0"); } catch (e) {}
   $("bDeep").classList.toggle("on", deepMode);
+  /* ⚠️ 开着的代价必须**当面说清** —— 这个开关是**记在 localStorage 里、下次开页面还是开的**,
+     用户很容易忘掉自己开过, 然后觉得"怎么每句话都要等好几秒"(2026-09-21 就是这么来的)。 */
   tr("🧠 深度大脑 " + (deepMode
-      ? "开 —— 聊天/提问交给电脑上的 Sky（开车仍本地秒回）"
-      : "关"), "dim");
+      ? "开 —— 以后**每句话**都交给电脑上的 Sky（会等几秒；再点一下这个钮关掉）"
+      : "关 —— 只有喊「Sky」或提到电脑/文件/上网这类才找它"), "dim");
 });
 $("bDeepSave").addEventListener("click", () => {
   if (BR) { tr("(这台是电脑发的页面, 深档已经自动接上, 不用填)", "dim"); return; }
