@@ -744,6 +744,18 @@ $("dial").addEventListener("pointercancel", () => $("dial").classList.remove("dr
    3) 蓝牙 —— 连车 + 12Hz 保活
    ======================================================================== */
 let dev = null, rxChar = null, writing = false;
+/* ---- 断线自愈(2026-09-21 真机踩到 "蓝牙断: 车/系统断开" 之后补的) ----
+   病灶不在这一页: 车连同之后, 页面一被 iOS 挂起(锁屏/切走/省电), 12.5Hz 保活就停了,
+   车那边很快把我们踢掉 → `gattserverdisconnected`。
+   而原来 `dev = null` 一了百了 —— 页面上只剩一句"蓝牙断", **再也回不来**;
+   用户看到的现象是"摇杆推了没反应"(没有链路时 writeDrive 直接 return, 一声不吭)。
+   ⇒ 留住用户挑中的设备句柄, **自动重连**: Web Bluetooth 里对**已经选过的**设备
+      再 `gatt.connect()` **不需要重新弹系统选单**(授权按 origin+设备记)。
+   安全性: 重连第一件事是补发 `enterRemote()`; 断开到重连至少隔 RECON_MS,
+      而所有命令的 TTL 上限是 800ms ⇒ **旧命令早过期了, 重连后头几帧一定是停车帧**。 */
+let lastDev = null;                       // 上次挑中的车(断了拿它重连)
+let reconTimer = null, reconN = 0;
+const RECON_MS = 1500, RECON_MAX = 40;    // 1.5s 一次, 最多 40 次(≈1 分钟)
 
 function carDrop(why) {
   tr("⚠️ 蓝牙断: " + why, "e");
@@ -753,6 +765,7 @@ function carDrop(why) {
   hud.v = hud.w = 0; hud.ttl = 0; hud.ble = false;
   $("bCar").classList.remove("on");
   draw();
+  scheduleRecon();
 }
 
 async function connectCar() {
@@ -760,11 +773,22 @@ async function connectCar() {
     tr("✗ 没有 navigator.bluetooth —— 先装 beacio 扩展并在 Safari 里允许本网站", "e");
     return;
   }
+  /* ⚠️⚠️ 模拟模式开着时**不许连车** —— 这不是挑剔, 是因为 `writeDrive()` 里
+     `if (hud.sim) return;` 会在**发帧之前**就返回 ⇒ 连上了也一个字节都不发,
+     车只收到开头的"进遥控模式", 之后零保活 ⇒ 几秒内必被踢 = 用户看到的"蓝牙断"。
+     (2026-09-21 真机踩到, 这是根因之一。) */
+  if (hud.sim) {
+    tr("✗ 还开着「模拟模式」—— 先关掉它再连车", "e");
+    dbg("模拟模式下不发任何蓝牙帧, 连上也留不住链路 ⇒ 拒绝连接");
+    return;
+  }
   try {
     dev = await navigator.bluetooth.requestDevice({
       filters: [{ services: [NUS] }],
       optionalServices: [NUS],
     });
+    lastDev = dev;                       // 记住它, 断了靠它自愈
+    if (reconTimer) { clearTimeout(reconTimer); reconTimer = null; reconN = 0; }
     dev.addEventListener("gattserverdisconnected", () => carDrop("车/系统断开"));
     const srv = await dev.gatt.connect();
     const svc = await srv.getPrimaryService(NUS);
@@ -779,6 +803,32 @@ async function connectCar() {
     if (e.name === "NotFoundError")
       tr("  车开机了吗? PC 的 carbody.py 是不是还占着车?", "dim");
   }
+}
+
+/* 断线后自己往回连。⚠️ 只认 `lastDev`(用户真选过的那台); 没有就什么都不做 —— 绝不主动弹选单。 */
+function scheduleRecon() {
+  if (reconTimer || !lastDev) return;
+  reconN = 0;
+  reconTimer = setTimeout(reconStep, RECON_MS);
+}
+function reconStep() {
+  reconTimer = null;
+  if (!lastDev || rxChar) return;          // 已经连上了(比如用户手动连回来了)就别添乱
+  reconN++;
+  lastDev.gatt.connect()
+    .then(async (srv) => {
+      const svc = await srv.getPrimaryService(NUS);
+      const ch  = await svc.getCharacteristic(RX);
+      dev = lastDev; rxChar = ch;
+      await ch.writeValueWithoutResponse(enterRemote());
+      hud.ble = true; $("bCar").classList.add("on"); draw();
+      tr("✓ 已自动重连(第 " + reconN + " 次)", "s");
+      reconN = 0;
+    })
+    .catch(() => {
+      if (reconN < RECON_MAX) reconTimer = setTimeout(reconStep, RECON_MS);
+      else tr("✗ 自动重连 " + RECON_MAX + " 次没成, 点「连车」重来", "e");
+    });
 }
 
 /* ⚠️ 保活是 12.5Hz —— 模拟模式下**只在命令变化时打印**, 否则一秒钟刷 12 行把记录淹了 */
@@ -1412,7 +1462,14 @@ $("bTest").addEventListener("click", () => {
 
 /* ⚠️ 页面被切走/锁屏 → 必须停车。人看不见车的时候, 车不该还在走。 */
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { hardStop("(页面切走)"); stopMic(); stopCam(); }
+  if (document.hidden) { hardStop("(页面切走)"); stopMic(); stopCam(); return; }
+  /* ⚠️ **切回来的这一下最该补**: iOS 挂起期间保活是停的, 车多半已经把我们踢了,
+     而定时器刚回前台还在被节流 —— 干等要趔好几个周期。回来立刻试一次, 用户基本感觉不到断过。 */
+  if (!dev && lastDev) {
+    if (reconTimer) { clearTimeout(reconTimer); reconTimer = null; }
+    reconN = 0;
+    reconTimer = setTimeout(reconStep, 200);
+  }
 });
 window.addEventListener("pagehide", () => { hardStop("(页面关闭)"); stopCam(); });
 
