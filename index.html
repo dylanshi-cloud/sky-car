@@ -167,8 +167,18 @@
      92 → **112** 就是瞳距 180 → **200**。
      ⚠️ 上限 = 视口宽 − 左右内边距 − 双眼总宽: 320 视口下是 304 − 176 = **128**(瞳距 216)。
         取 112 留了余量, 320 上仍然排得开。
-     ⚠️ 摇杆也跟着这段 gap 走(它居中在两眼之间), 所以它现在的余量从 2px 变成了 12px。 */
-  #face{flex:0 0 auto;position:relative;height:98px;
+     ⚠️ 摇杆也跟着这段 gap 走(它居中在两眼之间), 所以它现在的余量从 2px 变成了 12px。
+     ⚠️⚠️ `z-index:2` 是给**摇杆那 1/3 溢出**用的, 不加就是白干:
+        #face 和 #midRow 都是 `position:relative` 且 z-index:auto ⇒ 按 CSS 2.1 的绘制顺序,
+        这两棵子树属于**同一层**、**按树序先后绘制**, #midRow 在后 ⇒ 它的整棵子树
+        (包括里面 static 的 #tr 那块**不透明底色**)会**整个盖在 #face 之上**。
+        实测(390×844): 摇杆竖直中线从上往下采样 `+2/+10/+20/+30/+40` 命中 stick,
+        到 `+50` 就变成 `tr` —— 恰好是溢出起点(46)。也就是说**没有 z-index 时,
+        那溢出的 1/3 是被对话面板盖住的, 根本看不见**(而且那一片也点不到摇杆)。
+        给 #face 一个正的 z-index ⇒ 它升到"正 z-index"那一层, 整棵子树压过 #midRow。
+        ⚠️ 别改成只给 #stick 加 z-index: #face 不是层叠上下文(z-index:auto),
+           #stick 的 z-index 会去跟**更外层**的层叠上下文比, 结果更绕、更容易被后人改坏。 */
+  #face{flex:0 0 auto;position:relative;z-index:2;height:98px;
         display:flex;justify-content:center;align-items:flex-start;gap:112px}
   /* 角形金属框。两只眼的顶边都**朝鼻子那侧压下来** —— 这一斜就是"坏笑/不屑"的全部来源。
      ⚠️ clip-path 会把 box-shadow 一起裁掉, 所以外投影只能用 filter:drop-shadow(父级那个)。
@@ -274,16 +284,27 @@
         ⚠️ 底盘一改大小, **杆头/行程/护圈必须一起按同比例走**, 三处都要动:
            杆头 16 → 24, STICK_RX/RY 10/14 → **15/21**(见下面那段注释), 投影 px ×1.5。
            漏掉任何一处就是"球比盘大"或者"推到边上车还没到底"。
-        ⚠️⚠️ 2026-09-21 用户「摇杆下移」—— top 从 3 挪到 **18**。
-           老位置的底盘中心 = 26, 跟眼睛(高 52)中线齐平; 新的中心 = 18+34.5 = **52.5**,
-           正好落到**眼睛下缘那条线**上 ⇒ 一眼看得出是"从鼻子往下挪了", 但**仍在两眼之间**。
-           ⚠️ 下移的天花板:**底盘下缘不许越过 #face 底边(98)**, 否则它溢出到下面的
-              对话面板上(它是 absolute, #face 不长高)。现在 18+69 = 87, 只剩 11px 余量 ——
-              以后再往下挪必须同时把 #face 加高, 或者把底盘改小。
+        ⚠️⚠️ 2026-09-21 用户「摇杆下移」—— top 3 → 18 → **60**(当前)。
+           18 那版底盘中心 = 52.5, 落在眼睛下缘那条线上(仍全在 #face 里)。
+           60 这版是用户要求的「**底座 1/3 盖住对话窗体**」: 底盘下缘**故意溢出 #face**,
+           钻进下面 #tr(对话记录面板)的顶部, 溢出量 = 底盘高的 1/3 = 69/3 = **23px**
+           (60+69 = 129, 比 #face 的 98 多出 31; #face 底下还有 body 的 8px gap ⇒ 实盖 129−106 = 23)。
+           ⚠️⚠️ **60 与视口高度无关**, 推导: #stick 是 #face(position:relative) 的 absolute 子元素,
+              而 #face / #midRow 是 body 的直接子元素、中间只有 body 自己的 flex `gap:8px`,
+              #tr 又在 #midRow 里 `height:100%` 顶格 ⇒ 相对量恒等于
+              **98(#face 高) + 8(body gap) + 23(1/3 底盘高) − 69(底盘高) = 60**。
+              换视口时(#preview 在 284~360 之间伸缩)#face 与 #tr **一起平移**, 这个差不变。
+              ⚠️ 前提是 #face 高恒 98、body gap 恒 8、#tr 仍顶格 —— 动任一个都要重算。
+           ⚠️ 为什么压得住: #face 是 overflow:visible(**不裁**子元素); 且 #stick 是**定位元素**、
+              #tr 是 **static** ⇒ 定位元素画在非定位元素之上, 不用 z-index 就盖住了。
+           ⚠️ 代价(用户已知情接受): 底盘下 1/3 压在对话面板上, 那一片不再能拖动滚屏 ——
+              #stick 带 touch-action:none, 指针事件被它吃掉, 想翻记录得从别处下手。
+           ⚠️ 眼睛没被压到: 眼睛是 `align-items:flex-start` 贴着 #face 顶的、高 52
+              ⇒ 眼下缘在 #face 内 y=52; 底盘上缘 60 ⇒ **还留 8px**。
      ⚠️ touch-action:none —— 不写的话手指一拖整个页面跟着滚, 杆就抓不住了(同 #dial)。
      ⚠️ 底盘/护圈/球面光的写法与 #dial 逐条一致(径向渐变 + box-shadow spread 描环),
         一眼能看出这俩是同一套控件语言。 */
-  #stick{position:absolute;left:50%;top:18px;margin-left:-28.5px;width:57px;height:69px;
+  #stick{position:absolute;left:50%;top:60px;margin-left:-28.5px;width:57px;height:69px;
          border-radius:50% 50% 50% 50% / 58% 58% 42% 42%;touch-action:none;
          background:radial-gradient(circle at 38% 26%,#4d6f86 0%,#263b4e 34%,#111e2a 66%,#070c12 100%);
          /* ⚠️ 内高光/内阴影/护圈的 px 都**跟着底盘一起缩放**: 88 → 38 时缩了一半,
