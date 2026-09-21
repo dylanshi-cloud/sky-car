@@ -67,8 +67,15 @@
   #pvOff{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;
          justify-content:center;text-align:center;padding:14px;background:#070d13;
          color:#8fd0ff;font-size:14px}
-  #pvBadge{position:absolute;left:8px;top:8px;padding:2px 8px;border-radius:8px;
-           background:rgba(5,7,10,.62);color:#8fd0ff;font-size:11.5px}
+  /* ---- 摄像头三段小开关: 前 / 关 / 后, 压在画面右下角 ---- */
+  #camSw{position:absolute;right:8px;bottom:8px;display:flex;
+         border:1px solid #24506e;border-radius:9px;overflow:hidden;
+         background:rgba(5,7,10,.72)}
+  #camSw button{flex:0 0 auto;padding:6px 12px;font-size:12.5px;font-weight:600;
+                border:0;border-radius:0;background:transparent;color:#8fd0ff}
+  #camSw button+button{border-left:1px solid #24506e}
+  #camSw button.sel{background:#1d4f6e;color:#fff}
+  #camSw button:active{background:#2a6a8e}
 
   .row{display:flex;align-items:center;gap:8px;flex:0 0 auto}
   .row button{flex:1}
@@ -78,19 +85,33 @@
   button:disabled{opacity:.4}
   button.on{background:#123a2a;border-color:#2f7d55;color:#7ff0b0}
 
-  /* 常驻大红急停 —— 最后一道防线, 任何时候都在。
-     ⚠️ flex:0 0 auto 必须写: 父级是竖排 flex, 默认的 flex:1 在这里是**高度**会长满 */
-  #estop{flex:0 0 auto;width:100%;padding:22px;font-size:30px;font-weight:800;
-         letter-spacing:.3em;color:#fff;background:#b3160f;border:2px solid #ff5a4d;
-         border-radius:16px}
-  #estop:active{background:#e0221a}
+  /* ---- 脸: 一双卡通眼睛, 中间那个红鼻子就是急停钮 ---- */
+  #face{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:6px;
+        height:118px}
+  .eye{flex:0 0 auto;width:96px;height:110px;border-radius:50%;background:#eaf4ff;
+       position:relative;animation:blink 5.5s infinite}
+  .eye::before{content:"";position:absolute;left:50%;top:56%;width:42px;height:42px;
+               margin-left:-21px;border-radius:50%;background:#0b1620}
+  .eye::after{content:"";position:absolute;left:60%;top:33%;width:12px;height:12px;
+              border-radius:50%;background:#fff;opacity:.9}
+  /* ⚠️ 两只眼同时眨很假 —— 第二只错开一点 */
+  #eye2{animation-delay:1.1s}
+  @keyframes blink{0%,93%,100%{transform:scaleY(1)}96%{transform:scaleY(.07)}}
+
+  /* 急停 = 鼻子。做成圆的、大的、红的 —— 出事时手要去摸的就这一个东西。
+     ⚠️ flex:0 0 auto 必须写: 父级是横排 flex, 不写它会被拉宽 */
+  #estop{flex:0 0 auto;width:100px;height:100px;border-radius:50%;padding:0;
+         font-size:30px;font-weight:800;letter-spacing:0;color:#fff;
+         background:radial-gradient(circle at 34% 28%,#ff7a6b,#c8180f 72%);
+         border:3px solid #ff9c8e}
+  #estop:active{background:radial-gradient(circle at 34% 28%,#ff9c8e,#e0221a 72%)}
 
   #hud{flex:0 0 auto;border:1px solid #16303f;border-radius:11px;padding:8px 12px;
        background:#070d13;font:12px/1.6 ui-monospace,Menlo,monospace;white-space:pre-wrap}
   .ok{color:#5be08a}.bad{color:#ff6b6b}.warn{color:#ffc440}.dim{color:#5d7688}
 
   /* ⚠️ 高度写死、不随内容长 —— 否则一说起话来它就把上面的取景器越挤越小(实测 342→280px) */
-  #tr{flex:0 0 auto;height:104px;white-space:pre-wrap;word-break:break-word;
+  #tr{flex:0 0 auto;height:158px;white-space:pre-wrap;word-break:break-word;
       border:1px solid #16303f;border-radius:11px;padding:8px 12px;background:#070d13;
       overflow-y:auto;font-size:13px}
   #tr .u{color:#8fd0ff} #tr .c{color:#cfe3f2} #tr .s{color:#5be08a} #tr .e{color:#ff6b6b}
@@ -110,16 +131,21 @@
 
 <div id="preview">
   <video id="pv" playsinline muted autoplay></video>
-  <div id="pvBadge">摄像头 关</div>
   <div id="pvOff">点这里开摄像头</div>
+  <div id="camSw">
+    <button data-m="user">前</button><button data-m="off">关</button><button data-m="environment">后</button>
+  </div>
 </div>
 
-<div class="row">
-  <button id="bFlip">切前/后</button>
-  <button id="bCamOff">关摄像头</button>
+<!-- 脸: 一双卡通眼 + 中间那颗红鼻子(急停)。
+     ⚠️ 急停按钮**必须常驻在屏幕上**, 不许藏进 <details> 或需要滚动才看得到 —— 它比语音可靠。 -->
+<div id="face">
+  <div class="eye"></div>
+  <button id="estop">停</button>
+  <div class="eye" id="eye2"></div>
 </div>
 
-<button id="estop">停</button>
+<div id="tr"></div>
 
 <div id="hud">·</div>
 
@@ -127,8 +153,6 @@
   <button id="bCar">连车</button>
   <button id="bMic">开始听</button>
 </div>
-
-<div id="tr"></div>
 
 <details>
   <summary>设置 / 自检</summary>
@@ -312,10 +336,17 @@ let camStream = null;
 let camWant = "environment";          // 默认后摄(架在车上朝前看)
 const camName = () => (camWant === "user" ? "前" : "后");
 
+/* 三段开关的高亮: 只有摄像头**真的开着**才亮前/后, 否则一律亮「关」。
+   所以它必须挂在 camStream 上, 不能挂 camWant —— 失败时 camWant 已经改了,
+   亮着「后」但画面是关的, 比不亮还容易误判。 */
+function camSeg() {
+  const cur = camStream ? camWant : "off";
+  for (const b of $("camSw").children) b.classList.toggle("sel", b.dataset.m === cur);
+}
 function camUI(on, msg) {
   $("pvOff").style.display = on ? "none" : "flex";
   if (!on) $("pvOff").textContent = msg || "点这里开摄像头";
-  $("pvBadge").textContent = on ? ("摄像头 " + camName()) : "摄像头 关";
+  camSeg();
 }
 
 /* ⚠️ stop 掉并清空, 不留半死不活的 track */
@@ -356,8 +387,14 @@ async function startCam(want) {
       tr("  设置 → Safari → 相机 是不是被关了? 或地址栏左边「ᴀA」里改权限", "dim");
   }
 }
-$("bFlip").addEventListener("click", () => startCam(camWant === "user" ? "environment" : "user"));
-$("bCamOff").addEventListener("click", () => { stopCam(); tr("摄像头已关", "dim"); });
+/* 三段开关 前|关|后 (事件委托, 三个按钮共用) */
+$("camSw").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button");
+  if (!b) return;
+  const m = b.dataset.m;
+  if (m === "off") { stopCam(); tr("摄像头已关", "dim"); }
+  else startCam(m);
+});
 $("pvOff").addEventListener("click", () => startCam());
 
 /* ========================================================================
