@@ -586,7 +586,12 @@
 <details>
   <summary>设置 / 自检</summary>
   <div id="hud">·</div>
-  <label class="chk"><input type="checkbox" id="sim" checked> 模拟模式（不发蓝牙，只打印帧）</label>
+  <!-- ⚠️⚠️ 默认**关**(2026-09-21 改, 原来默认开) —— 这是个"看着能连、其实一个字节都不发"的陷阱:
+       开着它时 `writeDrive()` 会在发帧之前 `if (hud.sim) return;`, 于是①摇杆完全没反应
+       ②连上车后只发了开头的"进遥控模式"、之后零保活 ⇒ 车几秒内把我们踢掉。
+       手机和 PC 两条链都栽在这上面("连上又断开"/"一遥控就断"/"摇杆失灵")。
+       它现在的用途只剩"手上没车时试帧", 要试自己勾。 -->
+  <label class="chk"><input type="checkbox" id="sim"> 模拟模式（不发蓝牙，只打印帧）</label>
   <!-- ⚠️ 默认**开**: 用户要的就是"语音互动能看见画面"。关掉 = 只发文字, 省 token 省流量。 -->
   <label class="chk"><input type="checkbox" id="vis" checked> 语音带画面（大脑能看到摄像头此刻的画面，≈400 token/次）</label>
   <div>DeepSeek key（前面 32 位已内置，<b>只需补最后 3 位</b>，再点「保存 key」）
@@ -753,6 +758,7 @@ let dev = null, rxChar = null, writing = false;
    ⇒ 改成**优先带回应的写法**, 不被支持(`NotSupportedError`)再退回不带回应。
    `writeMode` 每次新连接都要清回 null —— 换一台设备可能支持得不一样。 */
 let writeMode = null;                  // null=还没定 / "ack"=等确认 / "noack"=不等
+let noCarHinted = false;               // "还没连车"那句只提示一次
 function bleWrite(u8) {
   if (writeMode === "noack") return rxChar.writeValueWithoutResponse(u8);
   if (writeMode === "ack")   return rxChar.writeValue(u8);
@@ -819,6 +825,7 @@ async function connectCar() {
     rxChar = await svc.getCharacteristic(RX);
     /* 进遥控模式 —— 不发这个, 后面的 drive 帧车不认 */
     await bleWrite(enterRemote());
+    noCarHinted = false;
     hud.ble = true; $("bCar").classList.add("on"); draw();
     tr("✓ 已连车 " + (dev.name || dev.id) + " , 已发进遥控模式", "s");
   } catch (e) {
@@ -846,6 +853,7 @@ function reconStep() {
       dev = lastDev; rxChar = ch;
       writeMode = null;                 // 重连 = 重新探
       await bleWrite(enterRemote());
+      noCarHinted = false;
       hud.ble = true; $("bCar").classList.add("on"); draw();
       tr("✓ 已自动重连(第 " + reconN + " 次)", "s");
       reconN = 0;
@@ -863,7 +871,16 @@ function writeDrive(v, w) {
     if (v !== simV || w !== simW) { simV = v; simW = w; dbg(`[模拟] ${hex(driveCmd(v, w))}`); }
     return;
   }
-  if (!rxChar || writing) return;      // 上一帧没写完就丢了重来, 保活宁可丢帧也不排队
+  /* ⚠️ 没连车时摇杆是**彻底静音**的(下面那句 return), 用户看到的就是"摇杆坏了"。
+     只提示一次, 连上后清掉 —— 12.5Hz 每帧刷会淹掉记录。 */
+  if (!rxChar) {
+    if ((v || w) && !noCarHinted) {
+      noCarHinted = true;
+      tr("还没连车 —— 先点「连车」; 现在推摇杆车不会动", "warn");
+    }
+    return;
+  }
+  if (writing) return;                 // 上一帧没写完就丢了重来, 保活宁可丢帧也不排队
   writing = true;
   bleWrite(driveCmd(v, w))
     .catch((e) => carDrop("写失败 " + e.name))
@@ -891,7 +908,8 @@ function keepTick() {
   w = Math.max(-CAR.max_w, Math.min(CAR.max_w, w));
   cmdV = v; cmdW = w;
   hud.v = v; hud.w = w; hud.ttl = Math.max(0, cmdEnd - now); draw();
-  if (rxChar || hud.sim) writeDrive(v, w);
+  /* 每帧都交出去 —— 没连车/没开模拟时 writeDrive 自己会安静地返回(并在真推了摇杆时提示一次) */
+  writeDrive(v, w);
 }
 setInterval(keepTick, KEEP_MS);
 
@@ -1498,7 +1516,7 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("pagehide", () => { hardStop("(页面关闭)"); stopCam(); });
 
-hud.sim = true;                 // 默认模拟! 要先"连车"再手动关掉, 免得误发
+hud.sim = $("sim").checked;     // 跟复选框走(现在默认关 —— 见上面那段注释)
 hud.ble = false; hud.mic = false; hud.v = hud.w = 0; hud.ttl = 0;
 
 /* ---- 预置 key: 网址后缀 `#k=sk-...` ----
