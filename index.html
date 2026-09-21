@@ -1538,6 +1538,10 @@ async function askBrain(text) {
     }
     const rd = r.body.getReader(), dec = new TextDecoder();
     let acc = "", buf = "", acted = false, tok = null;
+    /* 「首字」= 云端的 TTFT(动作词就在第一行行首, 所以**车的动作延迟 ≈ 首字时刻**);
+       「收完」= 整段流结束(回话行写完) —— 说的时候要等这个。
+       两者差多少 = "边收边说"还能再省多少, 这轮就是拿这个数下判断。 */
+    let firstTokAt = 0;
     for (;;) {
       const { done, value } = await rd.read();
       if (done) break;
@@ -1551,6 +1555,7 @@ async function askBrain(text) {
         const c = (d.choices || [])[0];
         const piece = c && c.delta && c.delta.content;
         if (!piece) continue;
+        if (!firstTokAt) firstTokAt = performance.now();
         acc += piece;
         /* ⚠️ 边收边判: 动作词在**第 1 行行首**, 所以一到就能定, 不必等回话写完。
            ⚠️ `doAction(..., true)` 的 true = **先别出声** —— 等回话行收完统一播,
@@ -1595,6 +1600,8 @@ async function askBrain(text) {
       if (cut.reply) tr("大脑: " + cut.reply, "c");
       else dbg("大脑没给回话行");
     }
+    dbg("大脑: 首字 " + (firstTokAt ? (firstTokAt - t0).toFixed(0) : "-") + "ms · 收完 "
+        + (performance.now() - t0).toFixed(0) + "ms · 回话 " + (speakText || "").length + " 字");
     if (speakText) say(speakText);
   } catch (e) {
     dbg("大脑失败: " + e.name + " — " + e.message);
@@ -1620,10 +1627,14 @@ function doAction(what, quiet) {
         → 大脑收到回声 → 又回一句 → 无限循环。所以 speak 前 abort 掉识别, 说完再续上。
    ⚠️ iOS 的 onend **经常不触发**(尤其中文), 必须配看门狗按字数估时间兜底, 否则说完再也听不到。 */
 let speaking = false, speakSeq = 0, lastSaid = "";
+/* 用户这句话"被识别定稿"的时刻 —— 端到端延迟(你说话→车开口)从这儿起算。
+   ⚠️ 只用于测量, 不参与任何判断。 */
+let turnT0 = 0;
 function say(t) {
   if (!t || !window.speechSynthesis) return;
   const my = ++speakSeq;
   lastSaid = t;
+  const tSay = performance.now();
   try {
     const u = new SpeechSynthesisUtterance(t);
     u.lang = "zh-CN"; u.rate = 1.1;
@@ -1631,10 +1642,18 @@ function say(t) {
     speaking = true;
     if (rec) { try { rec.abort(); } catch (e) {} }
     let done = false;
+    /* ⚠️ 「开口等」= 从调 speak() 到**真出声**的延迟(iOS 上这是几百毫秒量级的一段,
+        之前完全没量过)。「你说话→车开口」才是用户真感觉到的那个数。 */
+    u.onstart = () => dbg("说: 开口等 " + (performance.now() - tSay).toFixed(0) + "ms"
+      + (turnT0 ? " · 你说话→车开口 " + (performance.now() - turnT0).toFixed(0) + "ms" : ""));
     const fin = () => {
       if (done || my !== speakSeq) return;      // 被后一句顶掉了 → 这算旧账, 不管
       done = true; speaking = false;
-      if (listening) setTimeout(() => { if (listening && !speaking) { try { rec.start(); } catch (e) {} } }, 350);
+      const tFin = performance.now();
+      if (listening) setTimeout(() => {
+        if (listening && !speaking) { try { rec.start(); } catch (e) {} }
+        dbg("说完→重新在听 " + (performance.now() - tFin).toFixed(0) + "ms");
+      }, 350);
     };
     u.onend = fin; u.onerror = fin;
     speechSynthesis.speak(u);
@@ -1652,12 +1671,18 @@ function startMic() {
     rec.lang = "zh-CN";
     rec.continuous = true;
     rec.interimResults = true;
+    /* 最后一段"临时结果"到"定稿"之间隔了多久 —— 就是 Apple 判"你说完了"要等的静音。
+       这段是纯等, 但它是**第一段延迟**, 不量出来就没法解释"我明明说完了它半天不动"。 */
+    let lastInterimAt = 0;
     rec.onresult = (e) => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
-        if (!r.isFinal) continue;
+        if (!r.isFinal) { lastInterimAt = performance.now(); continue; }
         const text = (r[0].transcript || "").trim();
-        if (text) handleText(text);
+        if (text) {
+          if (lastInterimAt) dbg("听: 定稿(静音 " + (performance.now() - lastInterimAt).toFixed(0) + "ms)");
+          handleText(text);
+        }
       }
     };
     /* ⚠️ iOS 上识别会因为静音自己结束 —— 只要还开着听, 就重起。
@@ -1705,6 +1730,7 @@ function echoLike(t) {
    ⚠️ 顺序写死: 急停 → 本地词表 → (都不中才)大脑。**绝不让大脑待在"停"的路径上**。 */
 function handleText(text) {
   if (echoLike(text)) { dbg("忽略(像是听到自己刚说的): " + text); return; }
+  turnT0 = performance.now();          // 端到端延迟从这里起算(纯测量)
   tr("你: " + text, "u");
   if (isStop(text)) { tr("★ 急停口令命中 → 直接停", "s"); hardStop("(急停口令)"); return; }
   const local = localIntent(text);
