@@ -119,10 +119,10 @@
   button.on{background:#0f3b2a;border-color:#2f7d55;color:#8dffc0}
 
   /* ---- 脸: 变形金刚那路数的眼睛(角形金属框 + 青辉 + 白色亮核) + 中间的急停钮 ---- */
-  /* ⚠️ 高度必须 ≥ 急停钮的 top+height(56+66=122), 否则那个 absolute 的钮会溢出到
+  /* ⚠️ 高度必须 ≥ 急停钮的 top+height(56+36=92), 否则那个 absolute 的钮会溢出到
      #midRow 上去; 上面那 56px 正好装眼睛(眼高 52)。多出来的几 px 是余量。 */
-  #face{flex:0 0 auto;position:relative;height:128px;
-        display:flex;justify-content:center;align-items:flex-start;gap:64px}
+  #face{flex:0 0 auto;position:relative;height:98px;
+        display:flex;justify-content:center;align-items:flex-start;gap:92px}
   /* 角形金属框。两只眼的顶边都**朝鼻子那侧压下来** —— 这一斜就是"坏笑/不屑"的全部来源。
      ⚠️ clip-path 会把 box-shadow 一起裁掉, 所以外投影只能用 filter:drop-shadow(父级那个)。
      ⚠️ 用 polygon 就**不能**再写 border-radius, 两者互相覆盖。 */
@@ -177,26 +177,38 @@
   }
 
   /* 急停 —— 就是个**大红按钮**, 不是鼻子。急停蘑菇头的样子:
-     红色顶面(径向渐变偏左上) + 一圈深色护圈(base ring)。**没有文字**。
+     红色顶面(径向渐变偏左上) + 一圈深色护圈(base ring) + 中间一块**白方块**。**没有文字**。
+     ⚠️ 白方块是"停止"这个符号本身(录音机/播放器上那个 ■) —— 没有它这颗红钮就只是"一颗红钮",
+        有了它一眼就知道是停。它是 ::after, 不是多套一层 span, 就为省一个 DOM 节点。
      ⚠️ 形状 = **上宽下窄的钝角梯形**: 四个角的横半径上小下大, 底边就被"收"窄了。
         实心大蘑菇从斜上方看就是这个样子 —— 上宽下窄 + 底边一窄, 立刻读得出"按下去"。
      ⚠️ 护圈是 box-shadow 的 0 0 0 Npx(spread)描的 —— 它**跟着 border-radius 一起变形**,
         所以描出来的还是一圈同形状的轮廓, 不是个方框。它是"底座", 不是描边。
      ⚠️ 它**常驻在屏幕上**, 不许藏进 <details> —— 出事时手要去摸的就这一个东西。 */
-  #estop{position:absolute;left:50%;top:56px;margin-left:-33px;width:66px;height:66px;
+  #estop{position:absolute;left:50%;top:56px;margin-left:-18px;width:36px;height:36px;
          padding:0;border:0;
          border-radius:10% 10% 34% 34% / 12% 12% 44% 44%;
          background:radial-gradient(ellipse at 38% 24%,#ff9d8e 0%,#ff4436 42%,#c01508 76%,#7a0a03 100%);
-         box-shadow:inset 0 3px 2px rgba(255,255,255,.42),
-                    inset 0 -8px 13px rgba(70,0,0,.62),
-                    0 0 0 4px #101a24, 0 0 0 5px var(--line2),
-                    0 7px 14px rgba(0,0,0,.65);
+         box-shadow:inset 0 2px 1.5px rgba(255,255,255,.46),
+                    inset 0 -5px 8px rgba(70,0,0,.62),
+                    0 0 0 3px #101a24, 0 0 0 4px var(--line2),
+                    0 5px 9px rgba(0,0,0,.65);
          transition:transform .05s linear}
-  #estop:active{transform:translateY(3px) scale(.985);
-         box-shadow:inset 0 2px 2px rgba(255,255,255,.22),
-                    inset 0 8px 14px rgba(60,0,0,.7),
-                    0 0 0 4px #101a24, 0 0 0 5px var(--line2),
-                    0 2px 6px rgba(0,0,0,.6)}
+  /* ⚠️ 看着是 36px, 但**触摸热区撑回 60px** —— Apple 的最小可点尺寸是 44pt, 36 差一截;
+     这是急停键, 慌了手抖点不中就白搭。热区是透明的, 谁也看不见。
+     热区只往外扩到 145..229, 够不到两眼(141/233), 不会抢走任何其它元素的事件。 */
+  #estop::before{content:"";position:absolute;left:-12px;right:-12px;top:-12px;bottom:-12px}
+  /* 白方块用 px 不用 %: margin 的百分比是按**宽度**解, 一旦哪天这钮不方了就错位 */
+  #estop::after{content:"";position:absolute;left:50%;top:50%;width:14px;height:14px;
+                margin:-7px 0 0 -7px;border-radius:3px;
+                background:linear-gradient(180deg,#ffffff,#dbe6ed);
+                box-shadow:0 1px 2px rgba(90,0,0,.6)}
+  /* 按下去: 整体下沉 + 内高光收掉 + 外投影变短 —— 这三样一起变才"陷得进去" */
+  #estop:active{transform:translateY(2px) scale(.96);
+         box-shadow:inset 0 1px 1px rgba(255,255,255,.2),
+                    inset 0 5px 9px rgba(60,0,0,.72),
+                    0 0 0 3px #101a24, 0 0 0 4px var(--line2),
+                    0 2px 4px rgba(0,0,0,.6)}
 
   /* 最下面一行: 速度圆盘(左) + 车辆状态(右) */
   #bottom{flex:0 0 auto;display:flex;gap:9px;align-items:stretch}
