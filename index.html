@@ -21,8 +21,12 @@
   --------------------------------------------------------------------------
   为什么要挂公开 HTTPS: getUserMedia / SpeechRecognition / Web Bluetooth 都要
   **安全上下文**。PC 一关, face_server 就没了, 所以这页必须从公网 HTTPS 出。
-  ⚠️ **本页源码里没有任何密钥** —— DeepSeek key 由用户在页面上输一次, 存在
-     本机 localStorage, 只活在这台 iPhone 上, 不进 git、不进公网。
+  ⚠️ **本页源码里没有任何密钥** —— DeepSeek key 存在**本机 localStorage**,
+     只活在这台 iPhone 上, 不进 git、不进公网。两种放法:
+       · 在「设置」里输入框粘一次; 或
+       · 打开 **`.../sky-car/#k=sk-xxx`** —— 用 hash 不用 query(⛔ query 会进
+         GitHub Pages 的服务器访问日志, hash 永不外发), 读完立刻 `replaceState`
+         抹掉地址栏。这就是"预置进去", 而**公开源码里一个字都没有**。
   --------------------------------------------------------------------------
   依赖 (缺一个都不行):
     1. **beacio** Safari 扩展 —— iOS Safari 本体没有 Web Bluetooth, 靠它补上
@@ -408,7 +412,8 @@
   <summary>设置 / 自检</summary>
   <div id="hud">·</div>
   <label class="chk"><input type="checkbox" id="sim" checked> 模拟模式（不发蓝牙，只打印帧）</label>
-  <div>DeepSeek key（只存这台手机，不进源码/不进 git）</div>
+  <div>DeepSeek key（只存这台手机，不进源码/不进 git）
+    <br>也可以用 <b>网址<span class="dim">#k=sk-...</span></b> 打开一次, 自动读入并抹掉地址栏</div>
   <input type="password" id="key" placeholder="sk-...">
   <div class="row" style="margin-top:2px">
     <button id="bSave">保存 key</button>
@@ -974,6 +979,28 @@ window.addEventListener("pagehide", () => { hardStop("(页面关闭)"); stopCam(
 
 hud.sim = true;                 // 默认模拟! 要先"连车"再手动关掉, 免得误发
 hud.ble = false; hud.mic = false; hud.v = hud.w = 0; hud.ttl = 0;
+
+/* ---- 预置 key: 网址后缀 `#k=sk-...` ----
+   为什么要这条: 在 iPhone 上往输入框里粘一长串 key 很烦, 而且清一次缓存就没了。
+   把 key 挂在**网址的 hash** 上打开一次, 就地存进本机, 以后就再也不用管。
+   ⚠️⚠️ 用 **hash 不用 query(?k=)**: hash **永远不会发给服务器** —— GitHub Pages 的
+      访问日志、CDN 日志里都不会出现这个 key; `?k=` 会明文进日志。
+   ⚠️ 读完**立刻 replaceState 把 hash 抹掉**: 地址栏老挂着一串密钥, 截图/分享/历史
+      都会把它带出去。抹掉之后 key 只活在 localStorage 里。
+   ⚠️ 公开源码里**一个字都没有** —— 这条通路本身就是"密钥不进公开文件"的解法。
+   恢复办法: 再点一次那条带 `#k=` 的链接即可。 */
+(function restoreKeyFromHash() {
+  const m = /[#&]k=([^&]+)/.exec(location.hash || "");
+  if (!m) return;
+  let v = "";
+  try { v = decodeURIComponent(m[1]).trim(); } catch (e) { v = m[1].trim(); }
+  if (!v) return;
+  try { localStorage.setItem("ds_key", v); } catch (e) {}
+  if (window.history && history.replaceState)
+    history.replaceState(null, "", location.pathname + location.search);
+  tr("✓ 已从网址读入 DeepSeek key, 存在本机 (地址栏已抹掉)", "s");
+})();
+
 dialDraw();                     // 把圆盘画成当前上限(含上面刚恢复的 localStorage 值)
 draw();
 tr("先装 beacio → 点右侧蓝牙图标连车 → 点麦克风图标开始听。", "dim");
