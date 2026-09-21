@@ -119,10 +119,10 @@
   button.on{background:#0f3b2a;border-color:#2f7d55;color:#8dffc0}
 
   /* ---- 脸: 变形金刚那路数的眼睛(角形金属框 + 青辉 + 白色亮核) + 中间的急停钮 ---- */
-  /* ⚠️ 高度必须 ≥ 急停钮的 top+height(56+84=140), 否则那个 absolute 的圆钮会溢出到
-     #midRow 上去; 上面那 56px 正好装眼睛(眼高 52)。 */
-  #face{flex:0 0 auto;position:relative;height:140px;
-        display:flex;justify-content:center;align-items:flex-start;gap:38px}
+  /* ⚠️ 高度必须 ≥ 急停钮的 top+height(56+66=122), 否则那个 absolute 的钮会溢出到
+     #midRow 上去; 上面那 56px 正好装眼睛(眼高 52)。多出来的几 px 是余量。 */
+  #face{flex:0 0 auto;position:relative;height:128px;
+        display:flex;justify-content:center;align-items:flex-start;gap:64px}
   /* 角形金属框。两只眼的顶边都**朝鼻子那侧压下来** —— 这一斜就是"坏笑/不屑"的全部来源。
      ⚠️ clip-path 会把 box-shadow 一起裁掉, 所以外投影只能用 filter:drop-shadow(父级那个)。
      ⚠️ 用 polygon 就**不能**再写 border-radius, 两者互相覆盖。 */
@@ -176,23 +176,27 @@
     90%{transform:translate(0,0)}
   }
 
-  /* 急停 —— 就是个**大红按钮**, 不是鼻子了。做成急停蘑菇头的样子:
-     红色球冠(径向渐变偏左上) + 一圈深色护圈(base ring)。**没有文字**。
-     ⚠️ 护圈是用 box-shadow 的 0 0 0 Npx 描出来的(不是 border), 因为它要跟着按钮一起圆。
+  /* 急停 —— 就是个**大红按钮**, 不是鼻子。急停蘑菇头的样子:
+     红色顶面(径向渐变偏左上) + 一圈深色护圈(base ring)。**没有文字**。
+     ⚠️ 形状 = **上宽下窄的钝角梯形**: 四个角的横半径上小下大, 底边就被"收"窄了。
+        实心大蘑菇从斜上方看就是这个样子 —— 上宽下窄 + 底边一窄, 立刻读得出"按下去"。
+     ⚠️ 护圈是 box-shadow 的 0 0 0 Npx(spread)描的 —— 它**跟着 border-radius 一起变形**,
+        所以描出来的还是一圈同形状的轮廓, 不是个方框。它是"底座", 不是描边。
      ⚠️ 它**常驻在屏幕上**, 不许藏进 <details> —— 出事时手要去摸的就这一个东西。 */
-  #estop{position:absolute;left:50%;top:56px;margin-left:-42px;width:84px;height:84px;
-         padding:0;border:0;border-radius:50%;
-         background:radial-gradient(circle at 37% 27%,#ff9d8e 0%,#ff4436 40%,#c01508 74%,#7a0a03 100%);
+  #estop{position:absolute;left:50%;top:56px;margin-left:-33px;width:66px;height:66px;
+         padding:0;border:0;
+         border-radius:10% 10% 34% 34% / 12% 12% 44% 44%;
+         background:radial-gradient(ellipse at 38% 24%,#ff9d8e 0%,#ff4436 42%,#c01508 76%,#7a0a03 100%);
          box-shadow:inset 0 3px 2px rgba(255,255,255,.42),
-                    inset 0 -9px 16px rgba(70,0,0,.62),
-                    0 0 0 5px #101a24, 0 0 0 6px var(--line2),
-                    0 8px 16px rgba(0,0,0,.65);
+                    inset 0 -8px 13px rgba(70,0,0,.62),
+                    0 0 0 4px #101a24, 0 0 0 5px var(--line2),
+                    0 7px 14px rgba(0,0,0,.65);
          transition:transform .05s linear}
   #estop:active{transform:translateY(3px) scale(.985);
          box-shadow:inset 0 2px 2px rgba(255,255,255,.22),
-                    inset 0 8px 16px rgba(60,0,0,.7),
-                    0 0 0 5px #101a24, 0 0 0 6px var(--line2),
-                    0 3px 7px rgba(0,0,0,.6)}
+                    inset 0 8px 14px rgba(60,0,0,.7),
+                    0 0 0 4px #101a24, 0 0 0 5px var(--line2),
+                    0 2px 6px rgba(0,0,0,.6)}
 
   /* 最下面一行: 速度圆盘(左) + 车辆状态(右) */
   #bottom{flex:0 0 auto;display:flex;gap:9px;align-items:stretch}
@@ -215,17 +219,21 @@
            font:600 12px/14px ui-monospace,Menlo,monospace;color:var(--acc);
            pointer-events:none}
 
-  /* ---- 中段: 对话记录(左, 吃掉全部宽度) + 竖排两个立体图标钮(右) ---- */
-  #midRow{flex:0 0 auto;display:flex;gap:8px;height:158px}
-  /* ⚠️ 高度写死、不随内容长 —— 否则一说起话来它就把上面的取景器越挤越小(实测 342→280px) */
-  #tr{flex:1 1 auto;height:100%;white-space:pre-wrap;word-break:break-word;
-      border:1px solid var(--line);border-radius:12px;padding:8px 12px;background:var(--panel);
-      overflow-y:auto;font-size:13px}
+  /* ---- 中段: 对话记录(整行) + **嵌在对话框里面**的竖排两个立体图标钮 ---- */
+  #midRow{flex:0 0 auto;position:relative;height:158px}
+  /* ⚠️ 高度写死、不随内容长 —— 否则一说起话来它就把上面的取景器越挤越小(实测 342→280px)
+     ⚠️ 右边 padding 48px 是留给那两个钮的 —— 不加的话字会钻到按钮底下。 */
+  #tr{height:100%;white-space:pre-wrap;word-break:break-word;
+      border:1px solid var(--line);border-radius:12px;padding:8px 48px 8px 12px;
+      background:var(--panel);overflow-y:auto;font-size:13px}
   #tr .u{color:var(--acc)} #tr .c{color:var(--tx)} #tr .s{color:var(--ok)} #tr .e{color:var(--bad)}
 
-  /* ⚠️ 尺寸 = 上一版的一半(62 宽 / 75 高 → 32 宽 / 46 高), 居中排不撑满整列 */
-  #acts{flex:0 0 auto;width:32px;display:flex;flex-direction:column;
-        justify-content:center;gap:7px}
+  /* ⚠️ 挂在 #midRow 上(absolute)而不是当 flex 兄弟 —— 这样它**压在对话面板的右边框里侧**,
+     看着就是"嵌在对话框里"; 当兄弟排的话中间隔一条间隙, 一眼就看得出是两块东西。
+     ⚠️ #midRow 必须 position:relative, 否则它会去找 body 定位。
+     ⚠️ 尺寸 = 上一版的一半(62 宽 / 75 高 → 32 宽 / 46 高), 居中排不撑满整列 */
+  #acts{position:absolute;right:7px;top:50%;transform:translateY(-50%);
+        width:32px;display:flex;flex-direction:column;justify-content:center;gap:7px}
   /* 立体: 上缘一道内高光 + 下缘一道内阴影 + 外投影, 按下去就"陷进去"。
      ⚠️ 别只写 box-shadow —— inset 的高光/暗边才是"凸起来"的关键, 缺一个就是一块平色。 */
   #acts button{flex:0 0 auto;width:32px;height:46px;padding:0;border-radius:11px;
