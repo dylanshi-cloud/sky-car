@@ -1889,14 +1889,22 @@ async function askBrain(text, opt) {
        认法分两层(用户 2026-09-23 定调"看画面不看字"之后的分工):
          ① **主**: 模型对**画面**的声明(`decl`, 即「禁区: X」那一行) —— 它才是"看见了没有";
          ② **兜底**: 模型嘴上提到的禁区词(`hazardIn`, 已加**否定守卫**)。
-            只兜两种: 模型嘴上说「前面是河」却还是写了 前进(自相矛盾), 以及忘了写声明行。
+            ⚠️⚠️ 用户 2026-09-23 第二段定调: **声明写了 `禁区: 无` 就一律信画面** ——
+               兜底**只在模型压根没写声明行**(`decl.found === false`, 连契约都没遵守)时才出场。
+               原先"声明无也兜底"的后果实测是: 它明明声明了 无, 只是顺嘴提了一句
+               「红绿灯」/「斑马线」, 字表照样把它拦下 —— 那还是"看见字就停",
+               只不过换了个类别的名字(机动车道那张字表收的词, 在解说里出现得太频繁)。
        ⚠️ 放行(autoPassKey/autoPassUntil)只能由 `handleText` 写 —— **人嘴里的话**;
           模型自己碰不到, 所以模型**没法给自己发许可证**。
        ⚠️ 正因为判据要用**整段回话**(「前面是马路」在动作词**后面**才吐出来),
           主动模式的动作在流式阶段被**推迟**到这里(见上面 `if (ACTMAP[tok] && !o.cap)`)。
           这是全页唯一一处为了安全主动让出那几十毫秒的地方; 普通语音那条路**没有变化**。 */
     const hazDecl = decl.k ? HAZARDS.find(h => h.k === decl.k) : null;
-    const hazWord = (o.cap && !hazDecl) ? hazardIn(body) : null;
+    /* ⚠️ 只有**明明白白写了 `禁区: 无`**才让字表闭嘴(`declOf` 那三种写法都归到 `hit==="无"`)。
+       注意不能写成"没识别出禁区就闭嘴" —— 那样模型随手写个「禁区: 花坛」(契约外的值)
+       也会把兜底一起关掉, 而它其实什么都没声明。 */
+    const declClear = decl.found && !decl.k && decl.hit === "无";
+    const hazWord = (o.cap && !hazDecl && !declClear) ? hazardIn(body) : null;
     const haz = hazDecl
       ? Object.assign({}, hazDecl, { hit: decl.hit || hazDecl.label, src: "画面" })
       : hazWord ? Object.assign({}, hazWord, { src: "词表" }) : null;
