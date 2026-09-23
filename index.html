@@ -1875,7 +1875,7 @@ async function askBrain(text, opt) {
     const haz = o.cap ? hazardIn(acc) : null;
     const hazPassed = !!haz && autoPassKey === haz.k && autoPassUntil > performance.now();
     const hazBlock = (haz && !hazPassed)
-      ? ("这一轮提到了「" + haz.label + "」, 主人还没对**这个**放行")
+      ? ("这一轮提到了「" + (haz.hit || haz.label) + "」, 主人还没对**这个**放行")
       : "";
     if (o.cap && haz) {
       /* 记下"车刚才问出去的是哪个禁区" —— 主人下一句「可以过」就是对**这个问题**答的 */
@@ -1885,7 +1885,9 @@ async function askBrain(text, opt) {
         /* 对话框里留一句给主人看(节流: 同一个禁区 30 秒只说一条, 否则每 8 秒刷一行) */
         if (haz.k !== hazToldK || performance.now() - hazToldAt > 30000) {
           hazToldK = haz.k; hazToldAt = performance.now();
-          tr("■ 站住了: 前面像是「" + haz.label + "」—— 你说一声「可以过」我再动", "warn");
+          /* ⚠️ 用 `haz.hit`(它真正看到的那一个, 如「斑马线」)而不是类别名(「机动车道」)——
+             否则 Sky 嘴里说斑马线、横幅写机动车道, 主人会以为它认错东西了。 */
+          tr("■ 站住了: 前面像是「" + (haz.hit || haz.label) + "」—— 你说一声「可以过」我再动", "warn");
         }
       }
     }
@@ -2612,9 +2614,15 @@ const isQuestion = (t) =>
 /* ---- 禁区识别: 这句话里提到了哪个禁区(没提到 = "") ----
    ⚠️ 传进来的应该是**模型这一轮说给主人听的整段话**(`acc`), 不是单独一行 ——
       「前面是马路」这几个字在动作词后面才吐出来, 所以调用点必须等整段收完。 */
+/* ⚠️ 命中时要**带上命中的那个词**(h.hit) —— 类别名是给提示词用的("机动车道"),
+   而用户看到的横幅、Sky 嘴里说的都该是**它真正看到的那一个**(「斑马线」「路沿」)。
+   不带的症状: Sky 说「前面是斑马线, 我过不过?」而横幅写「前面像是机动车道」, 对不上。 */
 function hazardIn(t) {
   const s = String(t || "");
-  for (const h of HAZARDS) if (h.bad.test(s)) return h;
+  for (const h of HAZARDS) {
+    const m = h.bad.exec(s);              // ⚠️ 这些正则都没有 g 旗标 ⇒ 无 lastIndex 状态, 可放心复用
+    if (m) return Object.assign({}, h, { hit: m[0] });
+  }
   return null;
 }
 /* ---- 主人的**口头放行** ----
