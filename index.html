@@ -2436,7 +2436,14 @@ async function askBrain(text, opt) {
     });
     if (!r.ok) {
       dbg("大脑 HTTP " + r.status + " " + (await r.text()).slice(0, 120));
-      tr("✗ 大脑出错，这句没动", "e");
+      /* ⚠️ 这一句**必须带状态码**(2026-10-16 修): 401(key 失效) / 402(没钱) / 429(太频繁)
+         原来全糊成"大脑出错", 用户报障时拿不到任何可查的东西 —— 排查只能整条链逐段验。
+         另注: 网络层抛异常走的是下面 catch 那句「大脑连不上」, 两句指的不是一回事。 */
+      tr("✗ 大脑出错 " + r.status
+         + (r.status === 401 ? "（key 失效，去设置重填）"
+            : r.status === 402 ? "（账户余额不足）"
+            : r.status === 429 ? "（请求太频繁）" : "")
+         + "，这句没动", "e");
       return;
     }
     const rd = r.body.getReader(), dec = new TextDecoder();
