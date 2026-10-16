@@ -1629,6 +1629,22 @@ function stopCam() {
   camUI(false);
 }
 
+/* ---- 开"眼睛" ----
+   ⚠️⚠️ 用户 2026-10-16: **后摄默认优先超广角(0.5x)** —— 主动模式看到的世界就是 0.5x 的宽画面。
+   找不到超广角(没这镜头 / 标签漂了 / 授权前拿不到标签) ⇒ **回落 facingMode 主摄**;
+   用 exact 打开失败(iOS 上 deviceId 偶抛) ⇒ 也回落 —— 失败方向永远是"照旧开主摄", 不是打不开。
+   ⚠️ 前摄(user) 不用超广角。 */
+async function openEye() {
+  const base = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } };
+  const fm = { facingMode: { ideal: camWant }, ...base };
+  const get = (v) => navigator.mediaDevices.getUserMedia({ video: v, audio: false });
+  if (camWant !== "environment") return get(fm);
+  const id = await pickUltraWide();
+  if (!id) { dbg("眼睛: 后摄(没找到 0.5x 超广角, 用主摄)"); return get(fm); }
+  try { const s = await get({ deviceId: { exact: id }, ...base }); dbg("眼睛: 后摄用 0.5x 超广角"); return s; }
+  catch (e) { dbg("⚠️ 超广角开不了(" + e.name + "), 回落主摄"); return get(fm); }
+}
+
 async function startCam(want) {
   if (want) camWant = want;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -1642,12 +1658,7 @@ async function startCam(want) {
   lastMediaOp = "开摄像头"; lastMediaAt = performance.now();
   stopCam();                          // ⚠️ 见头部注释: 不先停, iOS 上两个一起死
   try {
-    camStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: camWant },          // ⚠️ 用 ideal 不用 exact —— exact 在 iOS 上易抛错
-               width: { ideal: 1280 }, height: { ideal: 720 },
-               frameRate: { ideal: 24, max: 30 } },     // 24fps 够用, 别让它满帧发烫
-      audio: false,
-    });
+    camStream = await openEye();      // ⚠️ 后摄默认超广角(0.5x), 见 openEye
     pv.srcObject = camStream;
     camUI(true);
     tr("✓ 摄像头 " + camName() + " 已开", "s");
@@ -1699,6 +1710,8 @@ function grabFrame() {
    ------------------------------------------------------------------------
    目标: 自主运动里"看到**有特点的东西**"就用**摄像头 0.5x**(= iPhone 超广角, 画面更宽)
          拍 **5 秒视频 + 照片**, **照片发企业微信**(手机直发, 户外不依赖电脑), 视频**只存手机本地**。
+   ⚠️ 用户 2026-10-16 追加: **主摄(后摄)默认就用 0.5x 超广角**(见 openEye) ⇒ 眼睛和拍摄
+      **同一颗镜头**, 拍摄时不再"切来切去"。找不到超广角/开不了 → 一律回落主摄, 不假装。
    ------------------------------------------------------------------------
    实测锁死的边界(规划期真跑出来的, 不是猜):
      · 企业微信 webhook 的 `OPTIONS` 预检 **403 且不带 `Access-Control-Allow-Origin`**
@@ -1725,20 +1738,9 @@ async function pickUltraWide() {
                 .find((d) => /ultra.?wide|超广角|0\.5/i.test(d.label || ""));
   return hit ? (hit.deviceId || null) : null;
 }
-/* 当前"眼睛"用的是哪颗(拿 deviceId 比一比, 免得"切到超广角"其实切了个寂寞) */
-function camDeviceId() {
-  if (!camStream) return "";
-  const t = camStream.getVideoTracks()[0];
-  try { return (t && t.getSettings && t.getSettings().deviceId) || ""; } catch (e) { return ""; }
-}
-/* 开一路流。devId 给了就用它(exact), 没给就按 camWant(前后摄) */
-async function openCamStream(devId) {
-  const base = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } };
-  const video = devId
-    ? Object.assign({ deviceId: { exact: devId } }, base)
-    : Object.assign({ facingMode: { ideal: camWant } }, base);
-  return navigator.mediaDevices.getUserMedia({ video: video, audio: false });
-}
+/* ⚠️ 原来这里还有 `camDeviceId()` 和 `openCamStream()` —— 用户 2026-10-16 把后摄默认改成
+   0.5x 超广角之后, 眼睛和拍摄**走同一颗镜头**(都经 openEye), 这两个"另挑一颗"的帮手就没人用了, 删掉。 */
+
 /* 从任意 <video> 抓一帧 JPEG(和 grabFrame 同一套算法, 只是 source 可变 + 宽上限更大) */
 function drawJpeg(v) {
   if (!v || !v.videoWidth || !v.videoHeight) return null;
@@ -1759,8 +1761,10 @@ async function reopenEye() {
     if (!camStream) { dbg("✗ 重开主摄像头仍失败"); tr("⚠️ 拍完摄像头没开回来 —— 点预览框重开一下", "warn"); }
   }
 }
-/* ---- 核心: 切超广角 → (录像) → 抓照片 → 复原 ----
+/* ---- 核心: 开镜头 → (录像) → 抓照片 → 复原 ----
    ms<=0 ⇒ 只拍照不录像。返回 {photo, video} / null。
+   ⚠️ 用户 2026-10-16: 眼睛(后摄)**本来就是 0.5x 超广角**(见 openEye) ⇒ 拍用的是**同一颗镜头**,
+      这里再单独挑一次镜头只会跟眼睛打架。所以**走和眼睛同一条决策**(openEye)。
    ⚠️ iOS **一次只能活一个摄像头** ⇒ 拍摄期间"眼睛"会黑 1~2s(autoTick 本来就没帧时等待, 另加 capBusy 闸
       挡住新一轮)。 */
 async function recordWideClip(ms) {
@@ -1768,16 +1772,10 @@ async function recordWideClip(ms) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     dbg("这个浏览器没有摄像头 API, 拍不了"); return null;
   }
-  const wideId = await pickUltraWide();
-  const wantWide = !!wideId && wideId !== camDeviceId();
-  if (!wideId) dbg("没找到 0.5x 超广角镜头, 用当前镜头拍的");
   stopCam();                                   // ⚠️ 不先停, iOS 上两个一起死
   let stream = null;
-  try { stream = await openCamStream(wantWide ? wideId : null); }
-  catch (e) {
-    dbg("✗ 超广角开流失败(" + e.name + ") → 回落当前镜头");
-    try { stream = await openCamStream(null); } catch (e2) { dbg("✗ 开摄像头也失败: " + e2.name); stream = null; }
-  }
+  try { stream = await openEye(); }
+  catch (e) { dbg("✗ 开镜头失败(" + e.name + ") → 拍不了"); stream = null; }
   if (!stream) { await reopenEye(); return null; }
 
   const v = document.createElement("video");
@@ -1785,7 +1783,7 @@ async function recordWideClip(ms) {
   const t0 = performance.now();
   try { await v.play(); } catch (e) {}
   while (!v.videoWidth && performance.now() - t0 < 1500) await sleep(50);
-  if (!v.videoWidth) dbg("⚠️ 超广角没出帧(可能被别的 App 占着)");
+  if (!v.videoWidth) dbg("⚠️ 镜头没出帧(可能被别的 App 占着)");
 
   let rec = null; const chunks = []; let mime = "";
   if (ms > 0 && window.MediaRecorder) {
@@ -3787,7 +3785,7 @@ $("bTest").addEventListener("click", () => {
       for (const v of vids)
         a.push("  " + (v.label || "(无标签)") + (/ultra.?wide|超广角|0\.5/i.test(v.label || "") ? "  ★超广角(0.5x)" : ""));
       const uw = await pickUltraWide();
-      a.push("  pickUltraWide → " + (uw ? "命中超广角" : "没找到(回落当前镜头)"));
+      a.push("  眼睛(后摄)会用 → " + (uw ? "0.5x 超广角" : "主摄(没找到超广角, 已回落)"));
     } catch (e) { a.push("摄像头枚举失败: " + e.name); }
     /* webhook 直发形状: 桩住 fetch, 只看它**怎么**发的(no-cors + text/plain = 绕预检) */
     const savedKey = localStorage.getItem("wecom_key"), savedFetch = window.fetch, savedTr = window.tr;
