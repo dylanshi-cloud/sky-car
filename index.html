@@ -643,9 +643,9 @@
   <label class="chk"><input type="checkbox" id="sim"> 模拟模式（不发蓝牙，只打印帧）</label>
   <!-- ⚠️ 默认**开**: 用户要的就是"语音互动能看见画面"。关掉 = 只发文字, 省 token 省流量。 -->
   <label class="chk"><input type="checkbox" id="vis" checked> 语音带画面（大脑能看到摄像头此刻的画面，≈400 token/次）</label>
-  <div>DeepSeek key（前面 32 位已内置，<b>只需补最后 3 位</b>，再点「保存 key」）
-    <br>⚠️ <b>这把 key 等于公开</b> —— 别拿它跑别的用途；真要弃用就到 DeepSeek 后台删掉重建，再把新前缀补进本页源码
-    <br>想要干净点: 用 <b>网址<span class="dim">#k=sk-...</span></b> 打开一次, 自动读入并抹掉地址栏</div>
+  <div>DeepSeek key（<b>已内置一把可用的</b>，点一下「保存 key」即用）
+    <br>⚠️ <b>这把 key 等于公开</b>（就写在公开源码里）—— 别拿它跑别的用途；真要弃用就到 DeepSeek 后台删掉重建，再把新 key 换进本页源码
+    <br>想换成自己的 key: 直接粘进下面输入框；或用 <b>网址<span class="dim">#k=sk-...</span></b> 打开一次, 自动读入并抹掉地址栏</div>
   <input type="password" id="key" placeholder="sk-..."
          autocapitalize="off" autocorrect="off" spellcheck="false">
   <div class="row" style="margin-top:2px">
@@ -3604,18 +3604,22 @@ $("bMediaReload").addEventListener("click", () => { renderMedia(); });
 /* 展开设置面板时刷一次素材列表(否则要手点「刷新」才看得到刚拍的) */
 $("setPane").addEventListener("toggle", (e) => { if (e.target.open) renderMedia(); });
 syncProf();
-/* ---- 内置 key 前 32 位(用户 2026-09-21 要求): 手机上只需手打最后 3 位 ----
-   ⚠️⚠️ **这不是"密钥不进公开文件"**: 剩下那 3 位是小写十六进制,
-      穷举空间只有 **16³ = 4096**, 几十行脚本一会儿就试完
-      ⇒ 公开仓库里躺着这一行, **事实上等于把这个 key 公开了**。
+/* ---- 内置 key(2026-09-21 起内置前 32 位; 2026-10-16 用户要求**整把内置**) ----
+   ⚠️⚠️ **这把 key 等于公开** —— 完整 35 位就写在公开源码里, 谁都能拿去刷你的余额。
+      2026-09-21 起本来就只有尾 3 位要手打(16³ = 4096, 一会儿就试完), **事实上早已等于公开**;
+      用户 2026-10-16 明确要求「把有效的 key 填写进默认页面」⇒ 直接内置整把, 手机上不再需要手打。
+      真要弃用 = DeepSeek 后台删掉重建 → 改这一行 → 重推 Pages。
+      ⚠️ 本机**同一把**还喂着 brain.py(PC 侧大脑) 与 F:\stock 投研引擎 —— 换 key 要一起换。
       真正干净的做法是本文件下方那条 `#k=` hash 通路(源码里一个字都没有)。
-   做法: 输入框**默认值 = 这 32 位**, 聚焦时光标自动落到末尾, 手打 3 位即可。
-   ⚠️ 2026-10-16 换过一次: 旧前缀 sk-7b53c80f… 那把已被 DeepSeek 拒(手机上报「✗ 大脑出错」
-      = 那条 fetch 拿到非 2xx, 而手动遥控走本地词表不碰云 ⇒ 才能"车能用、大脑报错")。
-      换成本机在用的这把(即 DEEPSEEK_API_KEY 的前 32 位)。 */
-const KEY_PREFIX = "sk-aea4657b7ab84733bea2cb30de835";
+   ⚠️ 2026-10-16 换过一次: 旧那把 sk-7b53c80f… 已被 DeepSeek 拒(手机上报「✗ 大脑出错 401」,
+      而手动遥控走本地词表不碰云 ⇒ 才能"车能用、大脑报错")。 */
+const KEY_FULL = "sk-aea4657b7ab84733bea2cb30de83514a";
+const KEY_PREFIX = KEY_FULL.slice(0, 32);           // "只手打尾巴"那条老路的兜底(仍可用)
+/* ⚠️ 已失效的旧内置前缀: 手机 localStorage 里若还存着它, **就地换掉** ——
+   否则手机上会一直 401, 而用户根本不知道该去「设置」里重存一次(2026-10-16 实况)。 */
+const KEY_DEAD_PREFIX = "sk-7b53c80f64b841d685b8c181336bd";
 
-$("key").value = KEY_PREFIX;                        // 默认值 = 前 32 位
+$("key").value = KEY_FULL;                          // 默认值 = 完整那把(点一下「保存 key」即用)
 $("key").addEventListener("focus", () => {          // 光标送到末尾(iOS 会按落点插到中间)
   const el = $("key");
   setTimeout(() => { try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) {} }, 0);
@@ -3623,13 +3627,21 @@ $("key").addEventListener("focus", () => {          // 光标送到末尾(iOS �
 $("bSave").addEventListener("click", () => {
   const raw = $("key").value.trim();
   if (!raw) { localStorage.removeItem("ds_key"); tr("已清空 key", "dim"); return; }
-  /* 只填了尾巴(比如 "576")→ 自动补上内置前缀; 填够长度 → 当整串 key 用(手动换 key 走这条) */
+  /* 只填了尾巴(比如 "14a")→ 自动补上内置前缀; 填够长度 → 当整串 key 用(手动换 key 走这条) */
   const v = raw.length < KEY_PREFIX.length ? KEY_PREFIX + raw : raw;
   if (v === KEY_PREFIX) { tr("还差最后 3 位没填", "warn"); return; }
   localStorage.setItem("ds_key", v);
-  $("key").value = KEY_PREFIX;                      // 复位, 免得再存一次把尾巴叠两遍
+  $("key").value = KEY_FULL;                        // 复位, 免得再存一次把尾巴叠两遍
   tr("✓ key 已存本机 (localStorage)", "s");
 });
+/* ⚠️ 顺序: 这条**必须放在 `#k=` 通路之前** —— 显式给了 hash 就以 hash 为准, 内置那把不许盖掉它。 */
+(function healDeadBuiltinKey() {
+  let cur = "";
+  try { cur = localStorage.getItem("ds_key") || ""; } catch (e) { return; }
+  if (cur && cur.indexOf(KEY_DEAD_PREFIX) !== 0) return;   // 有 key 且不是那把死的 → 一个字不动
+  try { localStorage.setItem("ds_key", KEY_FULL); } catch (e) { return; }
+  tr("✓ 已换上内置的可用 key（原来那把已被 DeepSeek 拒）", "s");
+})();
 $("sim").addEventListener("change", (e) => { hud.sim = e.target.checked; draw(); tr("模拟模式 " + (hud.sim ? "开" : "关"), "dim"); });
 /* ---- 深度大脑(电脑上的 Claude Code) ----
    ⚠️ 开关**不经 ASR** —— 不必先喊对"claude"才认, 这是最稳的一条逃生口。 */
@@ -3857,8 +3869,8 @@ hud.auto = false;               // 主动模式**默认关**(同上: 每次开�
       访问日志、CDN 日志里都不会出现这个 key; `?k=` 会明文进日志。
    ⚠️ 读完**立刻 replaceState 把 hash 抹掉**: 地址栏老挂着一串密钥, 截图/分享/历史
       都会把它带出去。抹掉之后 key 只活在 localStorage 里。
-   ⚠️ 这条通路**源码里一个字都没有** —— 上面 `KEY_PREFIX` 那条内置了 32/35 个字
-      (剩下 3 位十六进制 4096 种, 可穷举) ⇒ **真要干净就用这条 hash 通路, 别用内置那条**。
+   ⚠️ 这条通路**源码里一个字都没有** —— 上面内置的那把是**完整的 35 位**,
+      等于把它公开 ⇒ **真要干净就用这条 hash 通路, 别用内置那条**。
    恢复办法: 再点一次那条带 `#k=` 的链接即可。 */
 /* ⚠️ **必须在两个 restore 之前先快照**: 第一个跑完会 replaceState 把 hash 抹掉,
    第二个再去读 `location.hash` 就空了 —— 两个一起来(`#k=..&wk=..`)时第二个会静默失效。
@@ -4040,7 +4052,7 @@ else
 if (localStorage.getItem("ds_key"))
   tr("(已存 DeepSeek key —— 现在**控车和聊天都能用**, 直接说就行)", "dim");
 else
-  tr("(没设 key: 打开「设置」→ 输入框已填好前 32 位, 补最后 3 位 → 点「保存 key」)", "dim");
+  tr("(没设 key: 打开「设置」→ 点一下「保存 key」)", "dim");
 /* ⚠️ 给个"看得见"的凭据: 附没附上画面只进 #diag(藏在设置里), 不说一声用户没法判断它在不在工作。 */
 if ($("vis").checked)
   tr("(语音互动会带一帧摄像头画面 —— 可以说「你看到什么」; 想省 token 去「设置」里关)", "dim");
