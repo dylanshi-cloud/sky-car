@@ -815,9 +815,11 @@ function draw() {
     /* ⚠️「已发 N 帧」+ 写法 是**2026-09-21 真机"连上了但车不动"时的唯一判据**:
        帧没走出去 / 走了但车不认, 这两种在这行数字上一眼分开。 */
     `已发 ${txN} 帧  写法 ${writeMode || "(未定)"}  失败 ${txErr}  断 ${dropN}\n` +
-    (hud.auto
+    ((hud.auto
        ? `主动 开(${autoProfile === "outdoor" ? "户外" : "室内"}) 剩 ${mmss(autoLeft)}  幅度上限 ${Math.min(AP.pctMax, autoCapPct())}%`
-       : `主动 关`);
+       : `主动 关`)
+     /* ⚠️ 开了却一步没动时, 原因**直接写在脸上** —— 见 autoWhy() 那段的长注释。 */
+     + (hud.auto && hud.autoWhy ? "\n⏸ 待命: " + hud.autoWhy : ""));
 }
 
 /* ========================================================================
@@ -1168,6 +1170,17 @@ let hazToldK = "", hazToldAt = -1e9;
    `capAbort` = 正在进行的拍摄的"立刻停"函数(急停/让位/关模式/切走 时都会被调)。 */
 let capBusy = false;
 let capAbort = null;
+
+/* ---- ⚠️⚠️「开了开关却什么都不发生」的原因播报(用户 2026-10-16 报障后加) ----
+   报障原话: 「打开自主模式开关, 平衡车不会主动活动, 还是需要语音指令」。
+   查下来**逻辑本身是好的**(见 #bTest 与 6.5 节的用例: arm 之后一定会跑 autoThink 并发出运动帧),
+   真问题是 `autoTick` 里有**八处静默的提前返回** —— 没连车 / 没画面 / 人在说话让位中 /
+   正在拍摄 / 正在想或正在说 / 限速 / 画面没变 / 手还在杆上。任何一条卡住, 用户看到的就是
+   **"开关亮了, 但跟没开一样"**, 而且**没有任何一处可查的东西** —— 只能靠整条链逐段验。
+   ⇒ 每一处静默返回都报一次"为什么还没动": 同类原因 25 秒内只报一次, **原因一变立刻报**。
+      还在正常跑(每轮都在思考)时**一个字都不说**。 */
+let autoWhyKey = "", autoWhyAt = -1e9;
+let autoCamTryAt = 0;              // "没画面"时兜底重开摄像头的节流(别每 1.5s 试一次)
 
 function keepTick() {
   const now = performance.now();
@@ -3206,6 +3219,7 @@ function armAuto() {
   autoHist = []; autoSig = null; autoN = 0; autoYielded = false;
   /* ⚠️ 禁区放行**每次 arm 都清空** —— 上一趟的"可以过"绝不能顺延到这一趟 */
   autoPassKey = ""; autoPassUntil = 0; autoAskKey = ""; hazToldK = ""; hazToldAt = -1e9;
+  autoWhyKey = ""; autoWhyAt = -1e9; hud.autoWhy = ""; autoCamTryAt = 0;
   syncAuto();
   /* ⚠️ 眼睛和耳朵都得起来: 没画面它一步都走不了; 没麦克风, 人在后面喊"停"它也听不见。
      ⚠️⚠️ 正常情况这里**什么都不用做** —— `connectCar` 早在建链之前就把眼/耳叫起来了
@@ -3223,6 +3237,16 @@ function armAuto() {
       + (AUTO_SESSION_MS / 60000) + " 分钟");
   if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
   autoTimer = setTimeout(autoTick, 600);       // 给它 0.6s 把摄像头叫起来再开跑
+  /* ⚠️⚠️ 开了之后 3 秒还没画面就**当场说清** —— 这是"开关亮了但车一步不动"的头号原因,
+     而且它**不报错**(语音那条路没画面照样能答) ⇒ 不主动说出来, 用户只会以为功能坏了。 */
+  setTimeout(() => {
+    if (!autoOn) return;
+    if (!camStream || !pv.videoWidth) {
+      tr("⚠️ 主动模式已开, 但**摄像头没画面** —— 它全靠画面决定往哪走, 现在一步都不会动。"
+         + "点一下预览框把摄像头开起来(或用「设置」里的开启摄像头)。", "e");
+      dbg("主动模式: armed 3s 后仍无画面");
+    }
+  }, 3000);
 }
 function disarmAuto(why) {
   if (!autoOn) return;
@@ -3232,6 +3256,7 @@ function disarmAuto(why) {
   /* ⚠️ 禁区放行**跟着一起作废** —— 车都停了, 留着"可以过"没有任何意义,
      只有可能在下一次 arm 时变成一个没人记得的通行证。 */
   autoPassKey = ""; autoPassUntil = 0; autoAskKey = "";
+  autoWhyKey = ""; autoWhyAt = -1e9; hud.autoWhy = "";
   if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
   releaseWake();
   syncAuto();
@@ -3242,6 +3267,23 @@ function syncAuto() {
      而 armed 要的是琥珀 + 脉冲(见 #acts button.auto 那段注释)。 */
   $("bAuto").classList.toggle("auto", autoOn);
   hud.auto = autoOn;
+  draw();
+}
+
+/* ---- "开了却没动, 为什么" —— 见状态变量那段的长注释 ----
+   ⚠️ 只在**同一个原因连续存在**时才刷(25s 一次); 原因一变(比如从"没画面"变成"限速等待")
+      立刻再刷一行 —— 那一行往往正好指出用户该去修什么。 */
+function autoWhy(key, text) {
+  const now = performance.now();
+  /* ⚠️ 刚 armed 的头 4 秒是**热身**(开摄像头/开麦/第一句提示音), 那时候 `speaking`/没画面
+     都是暂时的 —— 这时候报"还没动"只会误导。 */
+  if (now - autoArmedAt < 4000) return;
+  hud.autoWhy = text;                                   // 让 HUD 也能一眼看见
+  if (autoWhyKey === key && now - autoWhyAt < 25000) return;   // 同一个原因: 25s 才再报一次
+  if (now - autoWhyAt < 8000) { autoWhyKey = key; return; }    // 原因来回跳时**别刷屏**
+  autoWhyKey = key; autoWhyAt = now;
+  tr("⏸ 还没动 —— " + text, "warn");
+  dbg("主动模式待命: " + key + " · " + text);
   draw();
 }
 
@@ -3284,7 +3326,12 @@ function autoTick() {
     disarmAuto("跑满 " + Math.round(AUTO_SESSION_MS / 60000) + " 分钟");
     return;
   }
-  if (now < autoPauseUntil) { later(1500); return; }    // ② 人工接管中 / 刚发过问在等人答
+  /* ② 人工接管中 / 刚发过问在等人答
+     ⚠️ 下面每一处静默返回都配一句 `autoWhy` —— 理由见状态变量那段(用户 2026-10-16 报"开了没反应")。 */
+  if (now < autoPauseUntil) {
+    autoWhy("pause", "在让位等人/等回答, 还有 " + Math.ceil((autoPauseUntil - now) / 1000) + " 秒");
+    later(1500); return;
+  }
   /* ⚠️⚠️ 用户 2026-09-23 追加: **聊完了先问一声再接着逛** ——
      "你聊好了吗? 没问题我就接着逛了"。⚠️ 这一句是**本地合成**的(直接 say(), 不走云端),
      所以答得又快又不要钱; 问完再安静 AUTO_ASK_HOLD_MS 等回答 ——
@@ -3299,13 +3346,26 @@ function autoTick() {
     later(1500);
     return;
   }
-  if (capBusy) { later(1000); return; }                  // ③' 正在拍摄(切超广角/录像/发送) ⇒ 别起新一轮
-  if (autoBusy || speaking || stickHeld) { later(1200); return; }  // ③ 正在想 / 正在说 / 手在杆上
+  if (capBusy) { autoWhy("cap", "正在拍照/录像(拍完自己接着逛)"); later(1000); return; }  // ③'
+  if (autoBusy || speaking || stickHeld) {              // ③ 正在想 / 正在说 / 手在杆上
+    autoWhy("busy", autoBusy ? "上一轮还没收完" : speaking ? "正在说话" : "手还按在摇杆上");
+    later(1200); return;
+  }
   if (now < autoNextAt) { later(autoNextAt - now); return; }       // ④ 限速: 最快 4s 一轮
-  if (!rxChar && !hud.sim) { later(2000); return; }     // ⑤ 没连车 —— **一个 token 都不烧**
-  if (!camStream || !pv.videoWidth) { later(1500); return; }       // ⑥ 没画面 = 瞎的, 不猜
+  if (!rxChar && !hud.sim) { autoWhy("nocar", "还没连车(点右上的「连车」)"); later(2000); return; } // ⑤
+  /* ⑥ 没画面 = 瞎的, 不猜 —— ⚠️ 这也是**最常见**的"开了不动": 摄像头没开/黑屏时它会一直等,
+     而语音那条路**没有画面照样能答** ⇒ 症状正好是"说话有反应、自己不动"。所以这里必须说出来。 */
+  if (!camStream || !pv.videoWidth) {
+    autoWhy("nocam", "摄像头没画面(主动模式全靠画面做决定, 点预览框开摄像头)");
+    if (now >= autoCamTryAt && !camPending) { autoCamTryAt = now + 10000; startCam(); }   // 兜底再开一次
+    later(1500); return;
+  }
   const mad = madOf(frameSig32(), autoSig);
-  if (mad < AUTO_MAD && now < autoThinkAt) { later(1500); return; } // ⑦ 画面没变, 省一次调用
+  if (mad < AUTO_MAD && now < autoThinkAt) {            // ⑦ 画面没变, 省一次调用
+    autoWhy("still", "画面没变, 省一次调用(最多再等 " + Math.ceil((autoThinkAt - now) / 1000) + " 秒)");
+    later(1500); return;
+  }
+  autoWhyKey = ""; hud.autoWhy = "";                    // 真的要去想了 ⇒ 待命原因作废
   autoThink();
 }
 
