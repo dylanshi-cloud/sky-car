@@ -1983,11 +1983,14 @@ async function renderMedia() {
 
 /* ---- 一轮"拍"的收口: 拍照/录像 → 发照片 → 存本地 ----
    ⚠️ 只在 `拍: 是` 那一轮被 autoThink 调用一次; `capBusy` 挡住 autoTick 起新一轮;
-      急停/让位/关模式会通过 `capAbort` 立刻掐掉。**全程不产生任何运动。** */
+      急停/让位/关模式会通过 `capAbort` 立刻掐掉。**拍本身不产生运动(车继续走) —— 只切镜头+拍+录。** */
 async function queueShot(note) {
   if (capBusy) return;
   capBusy = true;
   try {
+    /* ⚠️ 用户 2026-10-16: **拍的时候不停车** —— 车继续走, 拍摄只切镜头。
+       (曾短暂试过"拍前先停稳", 用户当场否掉: 自主探索不该为了拍照断一下。)
+       由此带来的掉线风险靠既有自愈兜: carDrop 掉线即清零命令 + 400ms 自动重连。 */
     tr("📷 看到有意思的东西, 拍一下(0.5x + 5s)…", "c");
     const clip = await recordWideClip(5000);
     if (!clip) { dbg("拍照失败(没拿到画面)"); return; }
