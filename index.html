@@ -643,8 +643,8 @@
   <label class="chk"><input type="checkbox" id="sim"> 模拟模式（不发蓝牙，只打印帧）</label>
   <!-- ⚠️ 默认**开**: 用户要的就是"语音互动能看见画面"。关掉 = 只发文字, 省 token 省流量。 -->
   <label class="chk"><input type="checkbox" id="vis" checked> 语音带画面（大脑能看到摄像头此刻的画面，≈400 token/次）</label>
-  <div>DeepSeek key（<b>已内置一把可用的</b>，点一下「保存 key」即用）
-    <br>⚠️ <b>这把 key 等于公开</b>（就写在公开源码里）—— 别拿它跑别的用途；真要弃用就到 DeepSeek 后台删掉重建，再把新 key 换进本页源码
+  <div>DeepSeek key（<b>已内置一把本车专用、可用的</b>，点一下「保存 key」即用）
+    <br>⚠️ <b>这把 key 等于公开</b>（就写在公开源码里）—— 它<b>只给这台车用</b>，别拿它跑别的用途；真要弃用就到 DeepSeek 后台删掉重建，再把新 key 换进本页源码
     <br>想换成自己的 key: 直接粘进下面输入框；或用 <b>网址<span class="dim">#k=sk-...</span></b> 打开一次, 自动读入并抹掉地址栏</div>
   <input type="password" id="key" placeholder="sk-..."
          autocapitalize="off" autocorrect="off" spellcheck="false">
@@ -3604,20 +3604,21 @@ $("bMediaReload").addEventListener("click", () => { renderMedia(); });
 /* 展开设置面板时刷一次素材列表(否则要手点「刷新」才看得到刚拍的) */
 $("setPane").addEventListener("toggle", (e) => { if (e.target.open) renderMedia(); });
 syncProf();
-/* ---- 内置 key(2026-09-21 起内置前 32 位; 2026-10-16 用户要求**整把内置**) ----
-   ⚠️⚠️ **这把 key 等于公开** —— 完整 35 位就写在公开源码里, 谁都能拿去刷你的余额。
+/* ---- 内置 key（2026-10-16: 本页改用**车专用**那把，不再用共享 key）----
+   ⚠️⚠️ **这把 key 等于公开** —— 完整 35 位就写在公开源码里, 谁都能拿去刷这个号的余额。
       2026-09-21 起本来就只有尾 3 位要手打(16³ = 4096, 一会儿就试完), **事实上早已等于公开**;
       用户 2026-10-16 明确要求「把有效的 key 填写进默认页面」⇒ 直接内置整把, 手机上不再需要手打。
+      ⇒ 既然一定等于公开, 那就**别用共享那把** —— 本页只写「车专用」key, 泄漏也烧不到 brain.py / F:\stock。
       真要弃用 = DeepSeek 后台删掉重建 → 改这一行 → 重推 Pages。
-      ⚠️ 本机**同一把**还喂着 brain.py(PC 侧大脑) 与 F:\stock 投研引擎 —— 换 key 要一起换。
-      真正干净的做法是本文件下方那条 `#k=` hash 通路(源码里一个字都没有)。
-   ⚠️ 2026-10-16 换过一次: 旧那把 REDACTED… 已被 DeepSeek 拒(手机上报「✗ 大脑出错 401」,
-      而手动遥控走本地词表不碰云 ⇒ 才能"车能用、大脑报错")。 */
+      真正干净的做法仍是本文件下方那条 `#k=` hash 通路(源码里一个字都没有)。
+   ✅ 2026-10-16 实测(直连 api.deepseek.com, max_tokens=1): 本行这把 → **200**;
+      共享那把 REDACTED… 也 **200**, 但它留给 brain.py(PC 侧大脑) 与 F:\stock 投研引擎, 本页不再引用。 */
 const KEY_FULL = "REDACTED";
 const KEY_PREFIX = KEY_FULL.slice(0, 32);           // "只手打尾巴"那条老路的兜底(仍可用)
-/* ⚠️ 已失效的旧内置前缀: 手机 localStorage 里若还存着它, **就地换掉** ——
-   否则手机上会一直 401, 而用户根本不知道该去「设置」里重存一次(2026-10-16 实况)。 */
-const KEY_DEAD_PREFIX = "REDACTED";
+/* ⚠️ 老手机里存的 key 修一下(2026-10-16 实况): 从前本页内置过**同一前缀**的 key, 手机上只手打过尾 3 位 ——
+   有人打错(比如打成 756)就一直 401, 而用户根本不知道该去「设置」里重存一次。
+   这里把「空 key」与「同前缀的老 key」一律就地换成上面那把正确的 ⇒ 用户什么都不用做。 */
+const KEY_LEGACY_PREFIX = KEY_PREFIX;
 
 $("key").value = KEY_FULL;                          // 默认值 = 完整那把(点一下「保存 key」即用)
 $("key").addEventListener("focus", () => {          // 光标送到末尾(iOS 会按落点插到中间)
@@ -3627,7 +3628,7 @@ $("key").addEventListener("focus", () => {          // 光标送到末尾(iOS �
 $("bSave").addEventListener("click", () => {
   const raw = $("key").value.trim();
   if (!raw) { localStorage.removeItem("ds_key"); tr("已清空 key", "dim"); return; }
-  /* 只填了尾巴(比如 "14a")→ 自动补上内置前缀; 填够长度 → 当整串 key 用(手动换 key 走这条) */
+  /* 只填了尾巴(比如 "576")→ 自动补上内置前缀; 填够长度 → 当整串 key 用(手动换 key 走这条) */
   const v = raw.length < KEY_PREFIX.length ? KEY_PREFIX + raw : raw;
   if (v === KEY_PREFIX) { tr("还差最后 3 位没填", "warn"); return; }
   localStorage.setItem("ds_key", v);
@@ -3635,12 +3636,14 @@ $("bSave").addEventListener("click", () => {
   tr("✓ key 已存本机 (localStorage)", "s");
 });
 /* ⚠️ 顺序: 这条**必须放在 `#k=` 通路之前** —— 显式给了 hash 就以 hash 为准, 内置那把不许盖掉它。 */
-(function healDeadBuiltinKey() {
+(function healBuiltinKey() {
   let cur = "";
   try { cur = localStorage.getItem("ds_key") || ""; } catch (e) { return; }
-  if (cur && cur.indexOf(KEY_DEAD_PREFIX) !== 0) return;   // 有 key 且不是那把死的 → 一个字不动
+  if (cur === KEY_FULL) return;                            // 已经是对的 → 一个字不动(不弹提示)
+  /* 有别的 key(用户自己用 #k= 或手填的) → 一个字不动; 只修「空的」与「本页老前缀那把」 */
+  if (cur && cur.indexOf(KEY_LEGACY_PREFIX) !== 0) return;
   try { localStorage.setItem("ds_key", KEY_FULL); } catch (e) { return; }
-  tr("✓ 已换上内置的可用 key（原来那把已被 DeepSeek 拒）", "s");
+  tr("✓ 已换上内置的可用 key（原来那把尾数不对）", "s");
 })();
 $("sim").addEventListener("change", (e) => { hud.sim = e.target.checked; draw(); tr("模拟模式 " + (hud.sim ? "开" : "关"), "dim"); });
 /* ---- 深度大脑(电脑上的 Claude Code) ----
