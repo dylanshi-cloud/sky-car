@@ -21,15 +21,17 @@
   --------------------------------------------------------------------------
   为什么要挂公开 HTTPS: getUserMedia / SpeechRecognition / Web Bluetooth 都要
   **安全上下文**。PC 一关, face_server 就没了, 所以这页必须从公网 HTTPS 出。
-  ⚠️ **本页源码里没有任何密钥** —— DeepSeek key 与企业微信 webhook 都存在**本机 localStorage**,
-     只活在这台 iPhone 上, 不进 git、不进公网。两种放法:
+  ⚠️ **DeepSeek key 只存在本机 localStorage** —— 只活在这台 iPhone 上, 不进 git、不进公网。
+     两种放法:
        · 在「设置」里输入框粘一次; 或
-       · 打开 **`.../sky-car/#k=sk-xxx`**(DeepSeek) / **`.../sky-car/#wk=xxx`**(企业微信 webhook)
-         —— 用 hash 不用 query(⛔ query 会进
+       · 打开 **`.../sky-car/#k=sk-xxx`** —— 用 hash 不用 query(⛔ query 会进
          GitHub Pages 的服务器访问日志, hash 永不外发), 读完立刻 `replaceState`
          抹掉地址栏。这就是"预置进去", 而**公开源码里一个字都没有**。
-     ⚠️⚠️ 企业微信 webhook key **绝不许写进源码**: 这页(和仓库)是公开的, key 一进源码,
-        全世界连同专门扫 webhook 的爬虫都能往那个群发消息。
+  ⚠️⚠️⚠️ **企业微信 webhook 是个例外 —— 用户 2026-10-16 明确要求把它内置进源码**
+     (见下方 `WECOM_DEFAULT`, 说了三次, 已知风险)。⇒ **本页源码里现在是有这个 key 的**,
+     公开仓库/页面人人可读, 谁都能往那个群发消息(只发, 读不到任何东西)。
+     `.../sky-car/#wk=xxx` 那条通路还在(自己换 key 用), 但默认值已经是内置那个。
+     要收回: 去企业微信删掉/重生成这条 webhook。
   --------------------------------------------------------------------------
   依赖 (缺一个都不行):
     1. **beacio** Safari 扩展 —— iOS Safari 本体没有 Web Bluetooth, 靠它补上
@@ -3561,7 +3563,17 @@ $("autoCap").addEventListener("change", (e) => {
   draw();
 });
 /* ---- 企业微信 webhook(用户 2026-10-16) ----
-   ⚠️⚠️ key **只存 localStorage, 绝不写进页面源码**(这页在 GitHub Pages 上是公开的)。 */
+   ⚠️⚠️ 用户 2026-10-16 **明确要求内置默认 key**(说了三次, 已知"这页/仓库是公开的"这条风险)。
+      取证: 这个 key = 投研中心那个(ai_research/config.json, opportunity-radar 也在复用) ⇒
+      车拍的照片和投研推送进**同一个群**。
+   ⚠️ **源码里躺着它 = 事实上等于公开**: 谁都能从公开仓库/页面里读到, 然后往这个群发消息
+      (拿到的只是"发消息"权限, 读不到任何东西)。要收回: 去企业微信把这条 webhook 删掉/重生成。
+   ⚠️ 用户在「设置」里自己填过就以他的为准; 想彻底关掉: 清空那栏再保存会回落本默认值 ⇒
+      真要停用请直接删/换 webhook(见上)。 */
+const WECOM_DEFAULT = "c0c995ce-4d9e-4a47-bbd3-a10a384bf9a1";
+if (!localStorage.getItem("wecom_key") && WECOM_DEFAULT) {
+  try { localStorage.setItem("wecom_key", WECOM_DEFAULT); } catch (e) {}
+}
 $("wecom").value = localStorage.getItem("wecom_key") || "";
 $("bWecomSave").addEventListener("click", () => {
   const v = $("wecom").value.trim();
@@ -3854,12 +3866,11 @@ const HASH_AT_LOAD = location.hash || "";
   tr("✓ 已从网址读入 DeepSeek key, 存在本机 (地址栏已抹掉)", "s");
 })();
 
-/* ---- 预置企业微信 webhook: 网址后缀 `#wk=<key>` ---- (同上面 `#k=` 那套一模一样的理由)
-   ⚠️⚠️ **绝不把 key 写进源码** —— 这页在 GitHub Pages 上是公开的(仓库也是公开的),
-      key 进源码 = 全世界(含专门扫 webhook 的爬虫)都能往那个群发消息。
-      挂 hash 打开一次 = 同样"不用手打", 而公开源码里一个字都没有。
-   用法: 把这条链接发给自己(企业微信/备忘), 在手机上点一次即可:
-      https://dylanshi-cloud.github.io/sky-car/#wk=<你的 webhook key> */
+/* ---- 预置企业微信 webhook: 网址后缀 `#wk=<key>` ----
+   ⚠️ 默认值已经内置在源码里(见 `WECOM_DEFAULT`, 用户 2026-10-16 明确要求) ⇒ 这条通路现在
+      只用于**临时换成别的 key**: 打开 `.../sky-car/#wk=<另一个 key>` 一次, 就地覆盖本机那份。
+      用 hash 不用 query 的理由同 `#k=`: hash 永不外发, 读完立刻 replaceState 抹掉。
+   用法: 把这条链接发给自己(企业微信/备忘), 在手机上点一次即可。 */
 (function restoreWecomFromHash() {
   const m = /[#&]wk=([^&]+)/.exec(HASH_AT_LOAD);
   if (!m) return;
