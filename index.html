@@ -27,11 +27,8 @@
        · 打开 **`.../sky-car/#k=sk-xxx`** —— 用 hash 不用 query(⛔ query 会进
          GitHub Pages 的服务器访问日志, hash 永不外发), 读完立刻 `replaceState`
          抹掉地址栏。这就是"预置进去", 而**公开源码里一个字都没有**。
-  ⚠️⚠️⚠️ **企业微信 webhook 是个例外 —— 用户 2026-10-16 明确要求把它内置进源码**
-     (见下方 `WECOM_DEFAULT`, 说了三次, 已知风险)。⇒ **本页源码里现在是有这个 key 的**,
-     公开仓库/页面人人可读, 谁都能往那个群发消息(只发, 读不到任何东西)。
-     `.../sky-car/#wk=xxx` 那条通路还在(自己换 key 用), 但默认值已经是内置那个。
-     要收回: 去企业微信删掉/重生成这条 webhook。
+  ⚠️ **企业微信 webhook 也只存本机 localStorage** —— 2026-10-16 曾内置进源码,
+     2026-10-21 因公开暴露已移除并改写 git 历史。用 `.../sky-car/#wk=xxx` 或设置里填一次。
   --------------------------------------------------------------------------
   依赖 (缺一个都不行):
     1. **beacio** Safari 扩展 —— iOS Safari 本体没有 Web Bluetooth, 靠它补上
@@ -3628,18 +3625,10 @@ $("autoCap").addEventListener("change", (e) => {
      + " 现在实际 ≤ " + Math.min(AP.pctMax, n) + "%；还会再被圆盘 " + CAR.max_v + "% 压一道）", "dim");
   draw();
 });
-/* ---- 企业微信 webhook(用户 2026-10-16) ----
-   ⚠️⚠️ 用户 2026-10-16 **明确要求内置默认 key**(说了三次, 已知"这页/仓库是公开的"这条风险)。
-      取证: 这个 key = 投研中心那个(ai_research/config.json, opportunity-radar 也在复用) ⇒
-      车拍的照片和投研推送进**同一个群**。
-   ⚠️ **源码里躺着它 = 事实上等于公开**: 谁都能从公开仓库/页面里读到, 然后往这个群发消息
-      (拿到的只是"发消息"权限, 读不到任何东西)。要收回: 去企业微信把这条 webhook 删掉/重生成。
-   ⚠️ 用户在「设置」里自己填过就以他的为准; 想彻底关掉: 清空那栏再保存会回落本默认值 ⇒
-      真要停用请直接删/换 webhook(见上)。 */
-const WECOM_DEFAULT = "REDACTED";
-if (!localStorage.getItem("wecom_key") && WECOM_DEFAULT) {
-  try { localStorage.setItem("wecom_key", WECOM_DEFAULT); } catch (e) {}
-}
+/* ---- 企业微信 webhook ----
+   2026-10-16 曾把默认 key 内置进源码; 因本页在公开 GitHub Pages 上 = 对全网公开,
+   2026-10-21 已移除并改写 git 历史。现在只存本机 localStorage(手动填一次)。
+   ⚠️ 旧 webhook 已泄露 ⇒ 请去企业微信把那条 webhook 删掉/重生成。 */
 $("wecom").value = localStorage.getItem("wecom_key") || "";
 $("bWecomSave").addEventListener("click", () => {
   const v = $("wecom").value.trim();
