@@ -3916,8 +3916,8 @@ const HASH_AT_LOAD = location.hash || "";
 })();
 
 /* ---- 预置企业微信 webhook: 网址后缀 `#wk=<key>` ----
-   ⚠️ 默认值已经内置在源码里(见 `WECOM_DEFAULT`, 用户 2026-10-16 明确要求) ⇒ 这条通路现在
-      只用于**临时换成别的 key**: 打开 `.../sky-car/#wk=<另一个 key>` 一次, 就地覆盖本机那份。
+   ⚠️ 源码里**不再内置默认值**(2026-10-21 已移除) ⇒ 这条通路既是首次填, 也可换 key:
+      打开 `.../sky-car/#wk=<key>` 一次, 就地写入本机那份。
       用 hash 不用 query 的理由同 `#k=`: hash 永不外发, 读完立刻 replaceState 抹掉。
    用法: 把这条链接发给自己(企业微信/备忘), 在手机上点一次即可。 */
 (function restoreWecomFromHash() {
